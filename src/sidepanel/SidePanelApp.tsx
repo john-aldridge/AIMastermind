@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '@/state/appStore';
-import { PlansView } from './components/PlansView';
-import { SettingsView } from './components/SettingsView';
-import { CreatePlanModal } from './components/CreatePlanModal';
+import { PlansView } from '@/popup/components/PlansView';
+import { SettingsView } from '@/popup/components/SettingsView';
+import { CreatePlanModal } from '@/popup/components/CreatePlanModal';
 import { sendToBackground } from '@/utils/messaging';
 import { MessageType } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
 
 type View = 'plans' | 'settings';
 
-export const PopupApp: React.FC = () => {
+export const SidePanelApp: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('plans');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const { plans, userConfig, updateUserConfig } = useAppStore();
@@ -57,28 +57,20 @@ export const PopupApp: React.FC = () => {
     saveState();
   }, [plans, userConfig]);
 
-  const handleSwitchToSidePanel = async () => {
-    // Save preference for side panel mode
-    updateUserConfig({ preferPopup: false });
+  const handleSwitchToPopup = async () => {
+    // Save preference for popup mode
+    updateUserConfig({ preferPopup: true });
     await saveState();
 
-    // Open side panel
-    if (chrome.sidePanel) {
-      const currentWindow = await chrome.windows.getCurrent();
-      if (currentWindow.id) {
-        await chrome.sidePanel.open({ windowId: currentWindow.id });
-      }
-    }
-
-    // Close popup
-    window.close();
+    // Show notification
+    alert('Switched to Popup mode. Click the extension icon to open the popup.\n\nYou can switch back to Side Panel mode in Settings.');
   };
 
   return (
-    <div className="w-[400px] h-[600px] bg-gray-50">
+    <div className="h-screen flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white p-4 shadow-lg">
-        <div className="flex items-center justify-between">
+      <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white p-4 shadow-lg flex-shrink-0">
+        <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-bold">AI Mastermind</h1>
           <div className="text-xs">
             <span className="font-semibold">{userConfig.tokenBalance}</span> tokens
@@ -86,7 +78,7 @@ export const PopupApp: React.FC = () => {
         </div>
 
         {/* Navigation */}
-        <div className="flex gap-2 mt-3">
+        <div className="flex gap-2">
           <button
             onClick={() => setCurrentView('plans')}
             className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
@@ -109,21 +101,24 @@ export const PopupApp: React.FC = () => {
           </button>
         </div>
 
-        {/* View Mode Switch */}
-        <div className="mt-3">
-          <button
-            onClick={handleSwitchToSidePanel}
-            className="w-full py-1.5 px-3 bg-primary-500 hover:bg-primary-400 text-white text-xs rounded flex items-center justify-center gap-1"
-          >
+        {/* View Mode Indicator */}
+        <div className="mt-3 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1 text-primary-100">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
             </svg>
-            <span>Open Side Panel (More Space)</span>
+            <span>Side Panel Mode</span>
+          </div>
+          <button
+            onClick={handleSwitchToPopup}
+            className="text-primary-100 hover:text-white underline"
+          >
+            Switch to Popup
           </button>
         </div>
       </div>
 
-      {/* Content */}
+      {/* Content - Scrollable */}
       <div className="flex-1 overflow-auto">
         {currentView === 'plans' ? (
           <PlansView onCreatePlan={() => setShowCreateModal(true)} />

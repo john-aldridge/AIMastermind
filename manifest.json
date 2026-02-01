@@ -6,19 +6,17 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "action": {
-    "default_popup": "popup/index.html",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
+    "default_title": "AI Mastermind"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
   },
   "background": {
     "service_worker": "background/index.js",
@@ -28,16 +26,10 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content/index.js"],
-      "css": ["assets/content.css"],
+      "css": ["assets/globals.css"],
       "run_at": "document_idle"
     }
   ],
-  "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
   "web_accessible_resources": [
     {
       "resources": ["assets/*", "chunks/*"],

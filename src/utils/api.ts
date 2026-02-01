@@ -1,12 +1,15 @@
 /**
  * API utility functions for interacting with AI models
- * Supports both user-provided API keys and our token system
+ * Supports both OpenAI and Claude (Anthropic) APIs
  */
+
+export type AIProvider = 'openai' | 'claude';
 
 export interface AIRequest {
   prompt: string;
   model?: string;
   maxTokens?: number;
+  systemPrompt?: string;
 }
 
 export interface AIResponse {
@@ -20,12 +23,41 @@ export interface TokenPurchaseRequest {
   paymentMethod: string;
 }
 
+export interface APIConfig {
+  provider: AIProvider;
+  apiKey: string;
+  model?: string;
+}
+
 export class APIService {
-  private baseUrl = 'https://api.openai.com/v1'; // Default to OpenAI
   private apiKey: string | null = null;
+  private provider: AIProvider = 'openai';
+  private model: string = 'gpt-4';
 
   setApiKey(key: string): void {
     this.apiKey = key;
+  }
+
+  setProvider(provider: AIProvider): void {
+    this.provider = provider;
+    // Set default model based on provider
+    if (provider === 'claude') {
+      this.model = 'claude-sonnet-4-5-20250929';
+    } else {
+      this.model = 'gpt-4';
+    }
+  }
+
+  setModel(model: string): void {
+    this.model = model;
+  }
+
+  getConfig(): APIConfig {
+    return {
+      provider: this.provider,
+      apiKey: this.apiKey || '',
+      model: this.model,
+    };
   }
 
   async generateContent(request: AIRequest, useOwnKey: boolean): Promise<AIResponse> {
@@ -33,23 +65,105 @@ export class APIService {
       throw new Error('API key not configured');
     }
 
-    try {
-      // TODO: Implement actual API call
-      // For now, this is a stub
-      console.log('Generating content:', request);
+    if (useOwnKey) {
+      if (this.provider === 'claude') {
+        return this.generateWithClaude(request);
+      } else {
+        return this.generateWithOpenAI(request);
+      }
+    }
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    // Fallback to our token system (stub)
+    return this.generateWithMockAPI(request);
+  }
+
+  private async generateWithClaude(request: AIRequest): Promise<AIResponse> {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey!,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: request.model || this.model,
+          max_tokens: request.maxTokens || 1024,
+          messages: [
+            {
+              role: 'user',
+              content: request.prompt,
+            },
+          ],
+          ...(request.systemPrompt && { system: request.systemPrompt }),
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`Claude API error: ${error.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
 
       return {
-        content: `Generated response for: ${request.prompt}`,
-        tokensUsed: Math.floor(Math.random() * 100) + 50,
-        model: request.model || 'gpt-4',
+        content: data.content[0].text,
+        tokensUsed: data.usage.input_tokens + data.usage.output_tokens,
+        model: data.model,
       };
     } catch (error) {
-      console.error('Error generating content:', error);
+      console.error('Error calling Claude API:', error);
       throw error;
     }
+  }
+
+  private async generateWithOpenAI(request: AIRequest): Promise<AIResponse> {
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: request.model || this.model,
+          messages: [
+            ...(request.systemPrompt ? [{ role: 'system', content: request.systemPrompt }] : []),
+            { role: 'user', content: request.prompt },
+          ],
+          max_tokens: request.maxTokens || 1024,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      return {
+        content: data.choices[0].message.content,
+        tokensUsed: data.usage.total_tokens,
+        model: data.model,
+      };
+    } catch (error) {
+      console.error('Error calling OpenAI API:', error);
+      throw error;
+    }
+  }
+
+  private async generateWithMockAPI(request: AIRequest): Promise<AIResponse> {
+    // Simulate API call for testing
+    console.log('Using mock API (no key provided):', request);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    return {
+      content: `Mock response for: ${request.prompt}\n\n(This is a simulated response. Configure your API key in Settings to get real AI responses.)`,
+      tokensUsed: Math.floor(Math.random() * 100) + 50,
+      model: request.model || this.model,
+    };
   }
 
   async purchaseTokens(request: TokenPurchaseRequest): Promise<{ success: boolean; newBalance: number }> {
@@ -70,14 +184,56 @@ export class APIService {
     }
   }
 
-  async validateApiKey(key: string): Promise<boolean> {
+  async validateApiKey(key: string, provider: AIProvider): Promise<{ valid: boolean; error?: string }> {
     try {
-      // TODO: Implement actual validation
-      console.log('Validating API key');
-      return key.length > 0;
+      if (provider === 'claude') {
+        // Test with a simple Claude API call
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 10,
+            messages: [{ role: 'user', content: 'Hi' }],
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errorMsg = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+          console.error('Claude API validation failed:', errorMsg);
+          return { valid: false, error: errorMsg };
+        }
+
+        return { valid: true };
+      } else {
+        // Test with OpenAI API call
+        const response = await fetch('https://api.openai.com/v1/models', {
+          headers: {
+            'Authorization': `Bearer ${key}`,
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errorMsg = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+          console.error('OpenAI API validation failed:', errorMsg);
+          return { valid: false, error: errorMsg };
+        }
+
+        return { valid: true };
+      }
     } catch (error) {
       console.error('Error validating API key:', error);
-      return false;
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : 'Network error - check your connection'
+      };
     }
   }
 }

@@ -1,8 +1,8 @@
 import { createRoot } from 'react-dom/client';
-import { PopupApp } from './PopupApp';
+import { SidePanelApp } from './SidePanelApp';
 import '@/styles/globals.css';
 
 const root = document.getElementById('root');
 if (root) {
-  createRoot(root).render(<PopupApp />);
+  createRoot(root).render(<SidePanelApp />);
 }

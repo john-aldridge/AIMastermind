@@ -4,6 +4,42 @@ import { chromeStorageService } from '@/storage/chromeStorage';
 
 console.log('AI Mastermind background script loaded');
 
+// Initialize API service with stored config
+async function initializeAPIService() {
+  const config = await chromeStorageService.loadUserConfig();
+  if (config?.apiKey) {
+    apiService.setApiKey(config.apiKey);
+    apiService.setProvider(config.aiProvider || 'claude');
+    if (config.aiModel) {
+      apiService.setModel(config.aiModel);
+    }
+  }
+}
+
+// Initialize on startup
+initializeAPIService();
+
+// Handle extension icon click - open side panel
+chrome.action.onClicked.addListener(async (tab) => {
+  console.log('Extension icon clicked, tab:', tab);
+  try {
+    // Always try to open side panel for now
+    if (chrome.sidePanel && chrome.sidePanel.open) {
+      console.log('Attempting to open side panel...');
+      if (tab.windowId) {
+        await chrome.sidePanel.open({ windowId: tab.windowId });
+        console.log('✅ Side panel opened successfully');
+      } else {
+        console.error('❌ No windowId available, tab:', tab);
+      }
+    } else {
+      console.error('❌ chrome.sidePanel API not available');
+    }
+  } catch (error) {
+    console.error('❌ Error opening side panel:', error);
+  }
+});
+
 // Handle installation
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
@@ -11,6 +47,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     // Initialize default settings
     chromeStorageService.saveUserConfig({
       useOwnKey: false,
+      aiProvider: 'claude',
       tokenBalance: 1000,
       dailyTokenUsage: 0,
       lastResetDate: new Date().toISOString().split('T')[0],
@@ -21,8 +58,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Handle messages
 chrome.runtime.onMessage.addListener(
-  (message: Message, sender, sendResponse: (response: MessageResponse) => void) => {
-    handleMessage(message, sender)
+  (message: Message, _sender, sendResponse: (response: MessageResponse) => void) => {
+    handleMessage(message)
       .then(sendResponse)
       .catch((error) => {
         console.error('Error handling message:', error);
@@ -35,8 +72,7 @@ chrome.runtime.onMessage.addListener(
 );
 
 async function handleMessage(
-  message: Message,
-  sender: chrome.runtime.MessageSender
+  message: Message
 ): Promise<MessageResponse> {
   switch (message.type) {
     case MessageType.GENERATE_CONTENT:

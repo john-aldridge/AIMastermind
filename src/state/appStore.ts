@@ -19,8 +19,20 @@ export interface MasterPlan {
 }
 
 export interface UserConfig {
+  // Legacy fields (for backward compatibility)
   apiKey?: string;
+  aiProvider?: 'openai' | 'claude';
+  aiModel?: string;
+
+  // New flexible provider system
   useOwnKey: boolean;
+  providerId?: string; // ID from providers.ts
+  providerCredentials?: Record<string, string>; // Flexible credentials storage
+
+  // UI preferences
+  preferPopup?: boolean; // false = side panel (default), true = popup
+
+  // Token management
   tokenBalance: number;
   dailyTokenUsage: number;
   lastResetDate: string;
@@ -65,6 +77,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   userConfig: {
     useOwnKey: false,
+    aiProvider: 'claude',
     tokenBalance: 1000, // Free starter tokens
     dailyTokenUsage: 0,
     lastResetDate: new Date().toISOString().split('T')[0],
