@@ -67,7 +67,7 @@ export const SidePanelApp: React.FC = () => {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="h-screen flex flex-col bg-gray-50 min-w-[400px] max-w-[600px]">
       {/* Header */}
       <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white p-4 shadow-lg flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
