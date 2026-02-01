@@ -7,7 +7,13 @@
     "storage",
     "activeTab",
     "scripting",
-    "sidePanel"
+    "sidePanel",
+    "downloads",
+    "notifications",
+    "declarativeNetRequest"
+  ],
+  "optional_permissions": [
+    "webRequest"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { MonitoringLevel } from '@/utils/networkMonitor';
 
 export interface SubExtension {
   id: string;
@@ -29,6 +30,13 @@ export interface SavedConfiguration {
   updatedAt: number;
 }
 
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
 export interface UserConfig {
   // Legacy fields (for backward compatibility)
   apiKey?: string;
@@ -44,8 +52,8 @@ export interface UserConfig {
   savedConfigurations: SavedConfiguration[];
   activeConfigurationId?: string;
 
-  // UI preferences
-  preferPopup?: boolean; // false = side panel (default), true = popup
+  // Network monitoring
+  networkMonitoringLevel?: MonitoringLevel;
 
   // Token management
   tokenBalance: number;
@@ -61,6 +69,9 @@ interface AppState {
 
   // User configuration
   userConfig: UserConfig;
+
+  // Chat messages
+  chatMessages: ChatMessage[];
 
   // UI state
   isPopupOpen: boolean;
@@ -85,6 +96,10 @@ interface AppState {
   updateConfiguration: (id: string, updates: Partial<SavedConfiguration>) => void;
   deleteConfiguration: (id: string) => void;
   activateConfiguration: (id: string) => void;
+
+  // Chat management
+  addChatMessage: (message: ChatMessage) => void;
+  clearChatMessages: () => void;
 
   setPopupOpen: (open: boolean) => void;
   addActiveWidget: (widget: SubExtension) => void;
@@ -112,11 +127,21 @@ export const useAppStore = create<AppState>((set) => ({
       },
     ],
     activeConfigurationId: 'free-model',
+    networkMonitoringLevel: 'filtering-only',
     tokenBalance: 1000, // Free starter tokens
     dailyTokenUsage: 0,
     lastResetDate: new Date().toISOString().split('T')[0],
     isPremium: false,
   },
+
+  chatMessages: [
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: 'Hello! Ask me anything about the current page you\'re viewing.',
+      timestamp: Date.now(),
+    },
+  ],
 
   isPopupOpen: false,
   activeWidgets: [],
@@ -250,5 +275,20 @@ export const useAppStore = create<AppState>((set) => ({
         useOwnKey: true,
       },
     };
+  }),
+
+  addChatMessage: (message) => set((state) => ({
+    chatMessages: [...state.chatMessages, message],
+  })),
+
+  clearChatMessages: () => set({
+    chatMessages: [
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: 'Hello! Ask me anything about the current page you\'re viewing.',
+        timestamp: Date.now(),
+      },
+    ],
   }),
 }));

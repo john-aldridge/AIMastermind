@@ -1,42 +1,85 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '@/state/appStore';
+import { ChatView } from './components/ChatView';
 import { PlansView } from './components/PlansView';
 import { SettingsView } from './components/SettingsView';
 import { CreatePlanModal } from './components/CreatePlanModal';
 import { sendToBackground } from '@/utils/messaging';
 import { MessageType } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
+import { networkMonitor } from '@/utils/networkMonitor';
 
-type View = 'plans' | 'settings';
+type View = 'chat' | 'plans' | 'settings';
 
 export const PopupApp: React.FC = () => {
-  const [currentView, setCurrentView] = useState<View>('plans');
+  console.log('🟣 [Popup] PopupApp component rendered');
+  const [currentView, setCurrentView] = useState<View>('chat');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const { plans, userConfig, updateUserConfig } = useAppStore();
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const { plans, userConfig, updateUserConfig, chatMessages } = useAppStore();
 
   useEffect(() => {
+    console.log('🟣 [Popup] PopupApp mounted at', new Date().toISOString());
     // Load state from storage on mount
     loadState();
+
+    // Log if popup is about to close
+    window.addEventListener('beforeunload', () => {
+      console.log('🟣 [Popup] beforeunload event - popup is closing');
+    });
+
+    return () => {
+      console.log('🟣 [Popup] PopupApp unmounted at', new Date().toISOString());
+    };
   }, []);
 
   const loadState = async () => {
-    const response = await sendToBackground({ type: MessageType.LOAD_STATE });
-    if (response.success && response.data) {
-      // Update store with loaded data
-      const { plans, userConfig, activePlanId } = response.data;
-      if (plans) useAppStore.setState({ plans });
-      if (userConfig) {
-        updateUserConfig(userConfig);
-        // Initialize API service with stored config
-        if (userConfig.apiKey) {
-          apiService.setApiKey(userConfig.apiKey);
-          apiService.setProvider(userConfig.aiProvider || 'claude');
-          if (userConfig.aiModel) {
-            apiService.setModel(userConfig.aiModel);
+    console.log('🟣 [Popup] loadState called');
+    try {
+      const response = await sendToBackground({ type: MessageType.LOAD_STATE });
+      console.log('🟣 [Popup] loadState response:', response.success);
+      if (response.success && response.data) {
+        // Update store with loaded data
+        const { plans, userConfig, activePlanId, chatMessages } = response.data;
+        if (plans) useAppStore.setState({ plans });
+        if (userConfig) {
+          updateUserConfig(userConfig);
+          // Initialize API service from active configuration
+          if (userConfig.activeConfigurationId && userConfig.savedConfigurations) {
+            const activeConfig = userConfig.savedConfigurations.find(
+              (c: any) => c.id === userConfig.activeConfigurationId
+            );
+            if (activeConfig) {
+              const apiKey = activeConfig.credentials.apiKey || activeConfig.credentials.api_key;
+              if (apiKey) {
+                apiService.setApiKey(apiKey);
+              }
+              // Map provider ID to API service provider type
+              const providerMap: Record<string, 'openai' | 'claude'> = {
+                'anthropic': 'claude',
+                'openai': 'openai',
+                'our-models': 'claude', // Default for our models
+              };
+              const mappedProvider = providerMap[activeConfig.providerId] || 'claude';
+              apiService.setProvider(mappedProvider);
+              apiService.setModel(activeConfig.model);
+            }
+          }
+          // Initialize network monitoring
+          const monitoringLevel = userConfig.networkMonitoringLevel || 'filtering-only';
+          if (monitoringLevel !== 'filtering-only') {
+            networkMonitor.setLevel(monitoringLevel);
           }
         }
+        if (activePlanId) useAppStore.setState({ activePlanId });
+        if (chatMessages) useAppStore.setState({ chatMessages });
       }
-      if (activePlanId) useAppStore.setState({ activePlanId });
+      console.log('🟣 [Popup] loadState completed');
+      // Mark initial load as complete
+      setIsInitialLoad(false);
+    } catch (error) {
+      console.error('❌ [Popup] loadState error:', error);
+      setIsInitialLoad(false);
     }
   };
 
@@ -48,31 +91,20 @@ export const PopupApp: React.FC = () => {
         plans: state.plans,
         userConfig: state.userConfig,
         activePlanId: state.activePlanId,
+        chatMessages: state.chatMessages,
       },
     });
   };
 
-  // Auto-save state changes
+  // Auto-save state changes (but skip on initial render)
   useEffect(() => {
-    saveState();
-  }, [plans, userConfig]);
-
-  const handleSwitchToSidePanel = async () => {
-    // Save preference for side panel mode
-    updateUserConfig({ preferPopup: false });
-    await saveState();
-
-    // Open side panel
-    if (chrome.sidePanel) {
-      const currentWindow = await chrome.windows.getCurrent();
-      if (currentWindow.id) {
-        await chrome.sidePanel.open({ windowId: currentWindow.id });
-      }
+    if (!isInitialLoad) {
+      console.log('🟣 [Popup] Auto-saving state changes');
+      saveState();
+    } else {
+      console.log('🟣 [Popup] Skipping auto-save during initial load');
     }
-
-    // Close popup
-    window.close();
-  };
+  }, [plans, userConfig, chatMessages]);
 
   return (
     <div className="w-[400px] h-[600px] bg-gray-50">
@@ -87,6 +119,16 @@ export const PopupApp: React.FC = () => {
 
         {/* Navigation */}
         <div className="flex gap-2 mt-3">
+          <button
+            onClick={() => setCurrentView('chat')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+              currentView === 'chat'
+                ? 'bg-white text-primary-700'
+                : 'bg-primary-500 hover:bg-primary-400 text-white'
+            }`}
+          >
+            Chat
+          </button>
           <button
             onClick={() => setCurrentView('plans')}
             className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
@@ -109,26 +151,20 @@ export const PopupApp: React.FC = () => {
           </button>
         </div>
 
-        {/* View Mode Switch */}
-        <div className="mt-3">
-          <button
-            onClick={handleSwitchToSidePanel}
-            className="w-full py-1.5 px-3 bg-primary-500 hover:bg-primary-400 text-white text-xs rounded flex items-center justify-center gap-1"
-          >
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
-            <span>Open Side Panel (More Space)</span>
-          </button>
-        </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto">
-        {currentView === 'plans' ? (
-          <PlansView onCreatePlan={() => setShowCreateModal(true)} />
-        ) : (
-          <SettingsView />
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {currentView === 'chat' && <ChatView />}
+        {currentView === 'plans' && (
+          <div className="overflow-auto flex-1">
+            <PlansView onCreatePlan={() => setShowCreateModal(true)} />
+          </div>
+        )}
+        {currentView === 'settings' && (
+          <div className="overflow-auto flex-1">
+            <SettingsView />
+          </div>
         )}
       </div>
 

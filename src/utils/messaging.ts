@@ -24,6 +24,9 @@ export enum MessageType {
   // Auth
   AUTHENTICATE = 'AUTHENTICATE',
   LOGOUT = 'LOGOUT',
+
+  // Downloads
+  GET_RECENT_DOWNLOADS = 'GET_RECENT_DOWNLOADS',
 }
 
 export interface Message<T = any> {

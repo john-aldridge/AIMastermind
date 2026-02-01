@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '@/state/appStore';
+import { ChatView } from '@/popup/components/ChatView';
 import { PlansView } from '@/popup/components/PlansView';
 import { SettingsView } from '@/popup/components/SettingsView';
 import { CreatePlanModal } from '@/popup/components/CreatePlanModal';
 import { sendToBackground } from '@/utils/messaging';
 import { MessageType } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
+import { networkMonitor } from '@/utils/networkMonitor';
 
-type View = 'plans' | 'settings';
+type View = 'chat' | 'plans' | 'settings';
 
 export const SidePanelApp: React.FC = () => {
-  const [currentView, setCurrentView] = useState<View>('plans');
+  const [currentView, setCurrentView] = useState<View>('chat');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const { plans, userConfig, updateUserConfig } = useAppStore();
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const { plans, userConfig, updateUserConfig, chatMessages } = useAppStore();
 
   useEffect(() => {
     // Load state from storage on mount
@@ -23,21 +26,42 @@ export const SidePanelApp: React.FC = () => {
     const response = await sendToBackground({ type: MessageType.LOAD_STATE });
     if (response.success && response.data) {
       // Update store with loaded data
-      const { plans, userConfig, activePlanId } = response.data;
+      const { plans, userConfig, activePlanId, chatMessages } = response.data;
       if (plans) useAppStore.setState({ plans });
       if (userConfig) {
         updateUserConfig(userConfig);
-        // Initialize API service with stored config
-        if (userConfig.apiKey) {
-          apiService.setApiKey(userConfig.apiKey);
-          apiService.setProvider(userConfig.aiProvider || 'claude');
-          if (userConfig.aiModel) {
-            apiService.setModel(userConfig.aiModel);
+        // Initialize API service from active configuration
+        if (userConfig.activeConfigurationId && userConfig.savedConfigurations) {
+          const activeConfig = userConfig.savedConfigurations.find(
+            (c: any) => c.id === userConfig.activeConfigurationId
+          );
+          if (activeConfig) {
+            const apiKey = activeConfig.credentials.apiKey || activeConfig.credentials.api_key;
+            if (apiKey) {
+              apiService.setApiKey(apiKey);
+            }
+            // Map provider ID to API service provider type
+            const providerMap: Record<string, 'openai' | 'claude'> = {
+              'anthropic': 'claude',
+              'openai': 'openai',
+              'our-models': 'claude', // Default for our models
+            };
+            const mappedProvider = providerMap[activeConfig.providerId] || 'claude';
+            apiService.setProvider(mappedProvider);
+            apiService.setModel(activeConfig.model);
           }
+        }
+        // Initialize network monitoring
+        const monitoringLevel = userConfig.networkMonitoringLevel || 'filtering-only';
+        if (monitoringLevel !== 'filtering-only') {
+          networkMonitor.setLevel(monitoringLevel);
         }
       }
       if (activePlanId) useAppStore.setState({ activePlanId });
+      if (chatMessages) useAppStore.setState({ chatMessages });
     }
+    // Mark initial load as complete
+    setIsInitialLoad(false);
   };
 
   const saveState = async () => {
@@ -48,23 +72,17 @@ export const SidePanelApp: React.FC = () => {
         plans: state.plans,
         userConfig: state.userConfig,
         activePlanId: state.activePlanId,
+        chatMessages: state.chatMessages,
       },
     });
   };
 
-  // Auto-save state changes
+  // Auto-save state changes (but skip on initial render)
   useEffect(() => {
-    saveState();
-  }, [plans, userConfig]);
-
-  const handleSwitchToPopup = async () => {
-    // Save preference for popup mode
-    updateUserConfig({ preferPopup: true });
-    await saveState();
-
-    // Show notification
-    alert('Switched to Popup mode. Click the extension icon to open the popup.\n\nYou can switch back to Side Panel mode in Settings.');
-  };
+    if (!isInitialLoad) {
+      saveState();
+    }
+  }, [plans, userConfig, chatMessages]);
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 min-w-[400px] max-w-[600px]">
@@ -79,6 +97,16 @@ export const SidePanelApp: React.FC = () => {
 
         {/* Navigation */}
         <div className="flex gap-2">
+          <button
+            onClick={() => setCurrentView('chat')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+              currentView === 'chat'
+                ? 'bg-white text-primary-700'
+                : 'bg-primary-500 hover:bg-primary-400 text-white'
+            }`}
+          >
+            Chat
+          </button>
           <button
             onClick={() => setCurrentView('plans')}
             className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
@@ -101,29 +129,20 @@ export const SidePanelApp: React.FC = () => {
           </button>
         </div>
 
-        {/* View Mode Indicator */}
-        <div className="mt-3 flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1 text-primary-100">
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
-            <span>Side Panel Mode</span>
-          </div>
-          <button
-            onClick={handleSwitchToPopup}
-            className="text-primary-100 hover:text-white underline"
-          >
-            Switch to Popup
-          </button>
-        </div>
       </div>
 
       {/* Content - Scrollable */}
-      <div className="flex-1 overflow-auto">
-        {currentView === 'plans' ? (
-          <PlansView onCreatePlan={() => setShowCreateModal(true)} />
-        ) : (
-          <SettingsView />
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {currentView === 'chat' && <ChatView />}
+        {currentView === 'plans' && (
+          <div className="overflow-auto flex-1">
+            <PlansView onCreatePlan={() => setShowCreateModal(true)} />
+          </div>
+        )}
+        {currentView === 'settings' && (
+          <div className="overflow-auto flex-1">
+            <SettingsView />
+          </div>
         )}
       </div>
 

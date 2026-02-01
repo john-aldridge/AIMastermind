@@ -1,4 +1,4 @@
-import { MasterPlan, UserConfig } from '@/state/appStore';
+import { MasterPlan, UserConfig, ChatMessage } from '@/state/appStore';
 
 /**
  * Chrome storage API wrapper for extension data
@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   PLANS: 'ai_mastermind_plans',
   USER_CONFIG: 'ai_mastermind_user_config',
   ACTIVE_PLAN: 'ai_mastermind_active_plan',
+  CHAT_MESSAGES: 'ai_mastermind_chat_messages',
 } as const;
 
 export const chromeStorageService = {
@@ -67,6 +68,39 @@ export const chromeStorageService = {
     } catch (error) {
       console.error('Error loading active plan from chrome.storage:', error);
       return null;
+    }
+  },
+
+  // Chat messages
+  saveChatMessages: async (messages: ChatMessage[]): Promise<void> => {
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEYS.CHAT_MESSAGES]: messages });
+    } catch (error) {
+      console.error('Error saving chat messages to chrome.storage:', error);
+    }
+  },
+
+  loadChatMessages: async (): Promise<ChatMessage[]> => {
+    try {
+      const result = await chrome.storage.local.get(STORAGE_KEYS.CHAT_MESSAGES);
+      return result[STORAGE_KEYS.CHAT_MESSAGES] || [
+        {
+          id: 'welcome',
+          role: 'assistant' as const,
+          content: 'Hello! Ask me anything about the current page you\'re viewing.',
+          timestamp: Date.now(),
+        },
+      ];
+    } catch (error) {
+      console.error('Error loading chat messages from chrome.storage:', error);
+      return [
+        {
+          id: 'welcome',
+          role: 'assistant' as const,
+          content: 'Hello! Ask me anything about the current page you\'re viewing.',
+          timestamp: Date.now(),
+        },
+      ];
     }
   },
 

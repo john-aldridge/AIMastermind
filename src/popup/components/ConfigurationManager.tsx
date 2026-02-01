@@ -17,7 +17,14 @@ export const ConfigurationManager: React.FC = () => {
     apiService.setApiKey(config.credentials.apiKey || '');
     const provider = getProviderById(config.providerId);
     if (provider) {
-      apiService.setProvider(config.providerId as any);
+      // Map provider ID to API service provider type
+      const providerMap: Record<string, 'openai' | 'claude'> = {
+        'anthropic': 'claude',
+        'openai': 'openai',
+        'our-models': 'claude', // Default for our models
+      };
+      const mappedProvider = providerMap[config.providerId] || 'claude';
+      apiService.setProvider(mappedProvider);
       apiService.setModel(config.model);
     }
   };
