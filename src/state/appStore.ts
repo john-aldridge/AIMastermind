@@ -18,6 +18,17 @@ export interface MasterPlan {
   updatedAt: number;
 }
 
+export interface SavedConfiguration {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
+  credentials: Record<string, string>;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface UserConfig {
   // Legacy fields (for backward compatibility)
   apiKey?: string;
@@ -28,6 +39,10 @@ export interface UserConfig {
   useOwnKey: boolean;
   providerId?: string; // ID from providers.ts
   providerCredentials?: Record<string, string>; // Flexible credentials storage
+
+  // Saved configurations
+  savedConfigurations: SavedConfiguration[];
+  activeConfigurationId?: string;
 
   // UI preferences
   preferPopup?: boolean; // false = side panel (default), true = popup
@@ -65,6 +80,12 @@ interface AppState {
   consumeTokens: (amount: number) => void;
   resetDailyUsage: () => void;
 
+  // Configuration management
+  addConfiguration: (config: SavedConfiguration) => void;
+  updateConfiguration: (id: string, updates: Partial<SavedConfiguration>) => void;
+  deleteConfiguration: (id: string) => void;
+  activateConfiguration: (id: string) => void;
+
   setPopupOpen: (open: boolean) => void;
   addActiveWidget: (widget: SubExtension) => void;
   removeActiveWidget: (widgetId: string) => void;
@@ -78,6 +99,19 @@ export const useAppStore = create<AppState>((set) => ({
   userConfig: {
     useOwnKey: false,
     aiProvider: 'claude',
+    savedConfigurations: [
+      {
+        id: 'free-model',
+        name: 'Free Model',
+        providerId: 'our-models',
+        providerName: 'Our Models',
+        credentials: {},
+        model: 'anthropic/claude-sonnet-4-5',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ],
+    activeConfigurationId: 'free-model',
     tokenBalance: 1000, // Free starter tokens
     dailyTokenUsage: 0,
     lastResetDate: new Date().toISOString().split('T')[0],
@@ -169,4 +203,52 @@ export const useAppStore = create<AppState>((set) => ({
       w.id === widgetId ? { ...w, position } : w
     ),
   })),
+
+  addConfiguration: (config) => set((state) => ({
+    userConfig: {
+      ...state.userConfig,
+      savedConfigurations: [...state.userConfig.savedConfigurations, config],
+    },
+  })),
+
+  updateConfiguration: (id, updates) => set((state) => ({
+    userConfig: {
+      ...state.userConfig,
+      savedConfigurations: state.userConfig.savedConfigurations.map((c) =>
+        c.id === id ? { ...c, ...updates, updatedAt: Date.now() } : c
+      ),
+    },
+  })),
+
+  deleteConfiguration: (id) => set((state) => {
+    // Prevent deletion of the free model configuration
+    if (id === 'free-model') {
+      console.warn('Cannot delete the Free Model configuration');
+      return state;
+    }
+
+    return {
+      userConfig: {
+        ...state.userConfig,
+        savedConfigurations: state.userConfig.savedConfigurations.filter((c) => c.id !== id),
+        activeConfigurationId: state.userConfig.activeConfigurationId === id ? undefined : state.userConfig.activeConfigurationId,
+      },
+    };
+  }),
+
+  activateConfiguration: (id) => set((state) => {
+    const config = state.userConfig.savedConfigurations.find((c) => c.id === id);
+    if (!config) return state;
+
+    return {
+      userConfig: {
+        ...state.userConfig,
+        activeConfigurationId: id,
+        providerId: config.providerId,
+        providerCredentials: config.credentials,
+        aiModel: config.model,
+        useOwnKey: true,
+      },
+    };
+  }),
 }));

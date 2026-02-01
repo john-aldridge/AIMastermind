@@ -1,0 +1,40 @@
+/* Side Panel Specific Styles */
+
+/* Set comfortable default width for side panel */
+body {
+  min-width: 420px;
+  width: 480px;
+  max-width: 600px;
+}
+
+/* Ensure side panel has proper sizing */
+#root {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Better scrolling for side panel content */
+.sidepanel-content {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Optimize for side panel's vertical layout */
+@media (max-width: 450px) {
+  body {
+    min-width: 360px;
+    width: 100%;
+  }
+}
+
+/* Ensure provider cards fit well in side panel */
+.provider-card {
+  max-width: 100%;
+}
+
+/* Better spacing for side panel mode */
+.sidepanel-padding {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}

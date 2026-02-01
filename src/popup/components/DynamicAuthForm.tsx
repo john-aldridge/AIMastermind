@@ -67,6 +67,42 @@ export const DynamicAuthForm: React.FC<DynamicAuthFormProps> = ({
     }
   };
 
+  // Special handling for "Our Models" provider
+  if (provider.id === 'our-models') {
+    return (
+      <div className="space-y-4">
+        {/* Billing Message */}
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-900">
+            To use these models, you must have a billing payment provider setup in your settings.
+          </p>
+        </div>
+
+        {/* Model Selection */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Model
+          </label>
+          <select
+            value={credentials.model || provider.defaultModel}
+            onChange={(e) => onChange('model', e.target.value)}
+            className="input-field text-sm"
+          >
+            {provider.models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name}
+                {model.contextWindow && ` (${(model.contextWindow / 1000).toFixed(0)}K context)`}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            Choose the model to use
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {provider.authFields.map((field) => (
@@ -105,19 +141,21 @@ export const DynamicAuthForm: React.FC<DynamicAuthFormProps> = ({
       </div>
 
       {/* Get API Key Link */}
-      <div className="p-3 bg-blue-50 rounded-lg">
-        <p className="text-xs text-blue-900 font-medium mb-1">
-          Need an API key?
-        </p>
-        <a
-          href={provider.apiKeyUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-blue-700 underline hover:text-blue-800"
-        >
-          Get your {provider.displayName} API key →
-        </a>
-      </div>
+      {provider.apiKeyUrl && (
+        <div className="p-3 bg-blue-50 rounded-lg">
+          <p className="text-xs text-blue-900 font-medium mb-1">
+            Need an API key?
+          </p>
+          <a
+            href={provider.apiKeyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-blue-700 underline hover:text-blue-800"
+          >
+            Get your {provider.displayName} API key →
+          </a>
+        </div>
+      )}
     </div>
   );
 };

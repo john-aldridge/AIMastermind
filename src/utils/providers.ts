@@ -46,6 +46,52 @@ export interface ProviderConfig {
 }
 
 export const AI_PROVIDERS: ProviderConfig[] = [
+  // Our Models (Managed Platform)
+  {
+    id: 'our-models',
+    name: 'our-models',
+    displayName: 'Our Models',
+    description: 'Access 100+ models through one billing system',
+    website: '',
+    apiKeyUrl: '',
+    tier: 'popular',
+    authFields: [],
+    models: [
+      {
+        id: 'anthropic/claude-sonnet-4-5',
+        name: 'Claude Sonnet 4.5',
+        contextWindow: 200000,
+      },
+      {
+        id: 'openai/gpt-4-turbo',
+        name: 'GPT-4 Turbo',
+        contextWindow: 128000,
+      },
+      {
+        id: 'google/gemini-pro-1.5',
+        name: 'Gemini Pro 1.5',
+        contextWindow: 2000000,
+      },
+    ],
+    defaultModel: 'anthropic/claude-sonnet-4-5',
+    headerFormat: () => ({
+      'Content-Type': 'application/json',
+    }),
+    apiEndpoint: '',
+    formatRequest: (prompt, model) => ({
+      url: '',
+      body: {
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1024,
+      },
+    }),
+    parseResponse: (data) => ({
+      content: data.choices[0].message.content,
+      tokensUsed: data.usage?.total_tokens || 0,
+    }),
+  },
+
   // Anthropic (Claude)
   {
     id: 'anthropic',
@@ -128,7 +174,19 @@ export const AI_PROVIDERS: ProviderConfig[] = [
     ],
     models: [
       {
-        id: 'gpt-4-turbo',
+        id: 'gpt-4o',
+        name: 'GPT-4o (Latest)',
+        contextWindow: 128000,
+        pricing: { input: 2.5, output: 10 },
+      },
+      {
+        id: 'gpt-4o-mini',
+        name: 'GPT-4o Mini',
+        contextWindow: 128000,
+        pricing: { input: 0.15, output: 0.6 },
+      },
+      {
+        id: 'gpt-4-turbo-preview',
         name: 'GPT-4 Turbo',
         contextWindow: 128000,
         pricing: { input: 10, output: 30 },
@@ -146,7 +204,7 @@ export const AI_PROVIDERS: ProviderConfig[] = [
         pricing: { input: 0.5, output: 1.5 },
       },
     ],
-    defaultModel: 'gpt-4-turbo',
+    defaultModel: 'gpt-4o-mini',
     headerFormat: (creds) => ({
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${creds.apiKey}`,

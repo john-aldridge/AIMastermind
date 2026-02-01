@@ -44,10 +44,25 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     console.log('AI Mastermind installed');
+
+    // Create default "Free Model" configuration
+    const freeModelConfig = {
+      id: 'free-model',
+      name: 'Free Model',
+      providerId: 'our-models',
+      providerName: 'Our Models',
+      credentials: {},
+      model: 'anthropic/claude-sonnet-4-5',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
     // Initialize default settings
     chromeStorageService.saveUserConfig({
       useOwnKey: false,
       aiProvider: 'claude',
+      savedConfigurations: [freeModelConfig],
+      activeConfigurationId: 'free-model',
       tokenBalance: 1000,
       dailyTokenUsage: 0,
       lastResetDate: new Date().toISOString().split('T')[0],
