@@ -588,10 +588,17 @@ export const ChatView: React.FC = () => {
               chatMessages: state.chatMessages.filter(m => m.id !== statusMessage.id)
             }));
 
+            // Format result for AI - highlight persistent features if present
+            let resultContent = JSON.stringify(result, null, 2);
+            if (result.contextNote) {
+              // Add prominent context note at the beginning
+              resultContent = `${result.contextNote}\n\n===== TOOL RESULT =====\n${resultContent}`;
+            }
+
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: JSON.stringify(result, null, 2),
+              content: resultContent,
             });
           } catch (error) {
             console.error(`[ChatView] Tool ${toolUse.name} failed:`, error);

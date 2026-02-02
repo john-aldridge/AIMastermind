@@ -240,7 +240,7 @@ export class BrowserClient extends APIClientBase {
       },
       {
         name: 'browser_monitor_reloads',
-        description: 'Monitor and log all page reload attempts with stack traces. Shows what code is trying to reload the page.',
+        description: 'Monitor and log all page reload attempts with stack traces. Shows what code is trying to reload the page. Captures reload attempts and stores them for later retrieval.',
         parameters: [
           {
             name: 'block_reloads',
@@ -250,6 +250,11 @@ export class BrowserClient extends APIClientBase {
             default: false,
           },
         ],
+      },
+      {
+        name: 'browser_get_reload_attempts',
+        description: 'Get all captured page reload attempts since monitoring started. Shows stack traces and timestamps of what tried to reload the page.',
+        parameters: [],
       },
       {
         name: 'browser_get_service_worker_script',
@@ -340,6 +345,9 @@ export class BrowserClient extends APIClientBase {
         case 'browser_monitor_reloads':
           result = await this.monitorReloads(parameters);
           break;
+        case 'browser_get_reload_attempts':
+          result = await this.getReloadAttempts(parameters);
+          break;
         case 'browser_get_service_worker_script':
           result = await this.getServiceWorkerScript(parameters);
           break;
@@ -381,6 +389,10 @@ export class BrowserClient extends APIClientBase {
 
     console.log('[BrowserClient] Executing JavaScript:', code);
 
+    // Log code size for context
+    const codeLines = code.split('\n').length;
+    console.log(`[BrowserClient] Code size: ${code.length} characters, ${codeLines} lines`);
+
     // Execute in MAIN world to bypass CSP restrictions
     const results = await chrome.scripting.executeScript({
       target: { tabId },
@@ -406,11 +418,41 @@ export class BrowserClient extends APIClientBase {
       throw new Error(result?.error || 'JavaScript execution failed');
     }
 
-    return {
+    // Analyze code to detect persistent changes
+    const persistentFeatures = [];
+    if (code.includes('MutationObserver')) {
+      persistentFeatures.push('MutationObserver - watching for DOM changes');
+    }
+    if (code.includes('setInterval')) {
+      persistentFeatures.push('setInterval - running code on a timer');
+    }
+    if (code.includes('addEventListener')) {
+      persistentFeatures.push('Event listeners - responding to user actions');
+    }
+    if (code.includes('window.') || code.includes('window[')) {
+      persistentFeatures.push('Global variables - stored in window object for later access');
+    }
+
+    const response: any = {
       executed: code,
       result: result.result,
       message: 'JavaScript executed successfully',
     };
+
+    // If persistent features detected, add detailed context
+    if (persistentFeatures.length > 0) {
+      response.persistentChanges = persistentFeatures;
+      response.contextNote = `IMPORTANT: This code installed ${persistentFeatures.length} persistent feature(s) that will continue running:\n${persistentFeatures.map(f => `- ${f}`).join('\n')}\n\nThese will remain active until page reload or explicitly removed.`;
+
+      // Log to console for visibility
+      console.log('%c[BrowserClient] 🔄 PERSISTENT FEATURES INSTALLED:', 'color: #FF9800; font-weight: bold; font-size: 14px');
+      persistentFeatures.forEach(feature => {
+        console.log(`%c  ✓ ${feature}`, 'color: #FF9800; font-weight: bold');
+      });
+      console.log('%c[BrowserClient] These features will continue running until page reload', 'color: #FF9800');
+    }
+
+    return response;
   }
 
   private async removeElement(params: any): Promise<any> {
@@ -1323,12 +1365,29 @@ export class BrowserClient extends APIClientBase {
       target: { tabId: tabs[0].id },
       world: 'MAIN',
       func: (shouldBlock: boolean) => {
+        // Initialize global storage for reload attempts
+        if (!(window as any).__reloadAttempts) {
+          (window as any).__reloadAttempts = [];
+        }
+
         // Intercept location.reload
         const originalReload = window.location.reload;
         (window.location as any).reload = function() {
           const stack = new Error().stack;
+          const timestamp = new Date().toISOString();
+
+          // Capture the reload attempt
+          const attempt = {
+            timestamp,
+            method: 'location.reload()',
+            stack: stack || 'No stack trace available',
+            blocked: shouldBlock,
+          };
+          (window as any).__reloadAttempts.push(attempt);
+
           console.warn('[Extension] Page reload detected!');
           console.warn('Stack trace:', stack);
+          console.warn('Attempt captured and stored. Total attempts:', (window as any).__reloadAttempts.length);
 
           if (shouldBlock) {
             console.warn('[Extension] Reload blocked');
@@ -1344,10 +1403,25 @@ export class BrowserClient extends APIClientBase {
           Object.defineProperty(window, 'location', {
             set: function(value) {
               const stack = new Error().stack;
+              const timestamp = new Date().toISOString();
+              const isReload = value === window.location.href;
+
+              // Capture the attempt if it's a reload
+              if (isReload) {
+                const attempt = {
+                  timestamp,
+                  method: 'location assignment (window.location = ...)',
+                  stack: stack || 'No stack trace available',
+                  blocked: shouldBlock,
+                };
+                (window as any).__reloadAttempts.push(attempt);
+                console.warn('Attempt captured and stored. Total attempts:', (window as any).__reloadAttempts.length);
+              }
+
               console.warn('[Extension] Location change detected:', value);
               console.warn('Stack trace:', stack);
 
-              if (shouldBlock && value === window.location.href) {
+              if (shouldBlock && isReload) {
                 console.warn('[Extension] Reload via location assignment blocked');
                 return;
               }
@@ -1364,9 +1438,10 @@ export class BrowserClient extends APIClientBase {
           success: true,
           monitoring: true,
           blocking: shouldBlock,
+          capturedAttempts: (window as any).__reloadAttempts.length,
           message: shouldBlock
-            ? 'Reload monitoring active - reloads will be blocked and logged'
-            : 'Reload monitoring active - reloads will be logged to console',
+            ? 'Reload monitoring active - reloads will be blocked and captured for reporting'
+            : 'Reload monitoring active - reloads will be captured and logged. Use browser_get_reload_attempts to retrieve captured attempts.',
         };
       },
       args: [block_reloads],
@@ -1375,6 +1450,59 @@ export class BrowserClient extends APIClientBase {
     const result = results[0]?.result;
     if (!result) {
       throw new Error('Failed to setup reload monitoring');
+    }
+
+    return result;
+  }
+
+  /**
+   * Get captured reload attempts
+   */
+  private async getReloadAttempts(_params: any): Promise<any> {
+    console.log('[BrowserClient] Retrieving captured reload attempts');
+
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error('No active tab found');
+    }
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: () => {
+        const attempts = (window as any).__reloadAttempts || [];
+
+        if (attempts.length === 0) {
+          return {
+            success: true,
+            count: 0,
+            attempts: [],
+            message: 'No reload attempts captured. Make sure browser_monitor_reloads is active.',
+          };
+        }
+
+        // Format attempts for better readability
+        const formattedAttempts = attempts.map((attempt: any, index: number) => ({
+          index: index + 1,
+          timestamp: attempt.timestamp,
+          method: attempt.method,
+          blocked: attempt.blocked,
+          stackTrace: attempt.stack,
+        }));
+
+        return {
+          success: true,
+          count: attempts.length,
+          attempts: formattedAttempts,
+          message: `Found ${attempts.length} reload attempt(s)`,
+        };
+      },
+      args: [],
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      throw new Error('Failed to retrieve reload attempts');
     }
 
     return result;
