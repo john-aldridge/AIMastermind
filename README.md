@@ -1,4 +1,4 @@
-# AI Mastermind Chrome Extension
+# Synergy AI Chrome Extension
 
 A powerful Chrome extension that allows you to create draggable, AI-powered widgets on any webpage through a simple popup interface.
 
@@ -104,7 +104,7 @@ Then load the `dist` folder as an unpacked extension in Chrome. You'll need to c
 
 ## Usage
 
-1. Click the AI Mastermind icon in your Chrome toolbar
+1. Click the Synergy AI icon in your Chrome toolbar
 2. Create a new Master Plan
 3. Add widgets to your plan with custom AI prompts
 4. Activate the plan to show widgets on the current page

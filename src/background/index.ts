@@ -3,7 +3,7 @@ import { apiService } from '@/utils/api';
 import { chromeStorageService } from '@/storage/chromeStorage';
 import { networkMonitor } from '@/utils/networkMonitor';
 
-console.log('AI Mastermind background script loaded');
+console.log('Synergy AI background script loaded');
 
 // Initialize API service with stored config
 async function initializeAPIService() {
@@ -132,7 +132,7 @@ chrome.action.onClicked.addListener(async (tab) => {
 // Handle installation
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    console.log('AI Mastermind installed');
+    console.log('Synergy AI installed');
 
     // Create default "Free Model" configuration
     const freeModelConfig = {

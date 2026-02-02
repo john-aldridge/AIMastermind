@@ -23,9 +23,10 @@
     /* Path aliases */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@mcp-clients/*": ["mcp-clients/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "mcp-clients"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

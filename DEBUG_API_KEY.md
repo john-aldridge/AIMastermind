@@ -9,7 +9,7 @@ I've updated the error handling to show **exactly** why your API key validation 
 ### 1. Reload the Extension
 ```
 1. Go to chrome://extensions/
-2. Click the refresh icon (🔄) on AI Mastermind
+2. Click the refresh icon (🔄) on Synergy AI
 3. Try entering your API key again
 ```
 
@@ -21,7 +21,7 @@ When you click "Save API Key", you should now see a detailed error message telli
 
 ### 3. Open Browser Console for More Details
 ```
-1. Click the AI Mastermind extension icon
+1. Click the Synergy AI extension icon
 2. Right-click anywhere in the popup
 3. Select "Inspect" or "Inspect Element"
 4. Go to the "Console" tab

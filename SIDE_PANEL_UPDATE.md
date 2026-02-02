@@ -2,7 +2,7 @@
 
 ## What Was Built
 
-AI Mastermind now supports **both Side Panel and Popup modes** with smart switching and preference persistence!
+Synergy AI now supports **both Side Panel and Popup modes** with smart switching and preference persistence!
 
 ## 🎯 Key Features
 
@@ -52,7 +52,7 @@ AI Mastermind now supports **both Side Panel and Popup modes** with smart switch
 ### Side Panel Header:
 ```
 ┌────────────────────────────────────┐
-│ AI Mastermind      1000 tokens    │
+│ Synergy AI      1000 tokens    │
 │ [Plans] [Settings]                │
 │ ⚡ Side Panel Mode  Switch to Popup│
 └────────────────────────────────────┘
@@ -61,7 +61,7 @@ AI Mastermind now supports **both Side Panel and Popup modes** with smart switch
 ### Popup Header:
 ```
 ┌────────────────────────────────────┐
-│ AI Mastermind      1000 tokens    │
+│ Synergy AI      1000 tokens    │
 │ [Plans] [Settings]                │
 │ [📱 Open Side Panel (More Space)]  │
 └────────────────────────────────────┘
@@ -185,7 +185,7 @@ Only the wrapper is different (`SidePanelApp` vs `PopupApp`).
 
 1. **Reload extension**:
    ```
-   chrome://extensions/ → Click refresh on AI Mastermind
+   chrome://extensions/ → Click refresh on Synergy AI
    ```
 
 2. **Open side panel**:

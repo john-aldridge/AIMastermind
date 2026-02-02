@@ -11,19 +11,19 @@ const injectInterceptor = () => {
     const script = document.createElement('script');
     const interceptorUrl = chrome.runtime.getURL('content/interceptor.js');
 
-    console.log('%c[AI Mastermind] Attempting to inject interceptor from:', interceptorUrl, 'background: #607D8B; color: white; padding: 2px 5px; border-radius: 3px;');
+    console.log('%c[Synergy AI] Attempting to inject interceptor from:', interceptorUrl, 'background: #607D8B; color: white; padding: 2px 5px; border-radius: 3px;');
 
     script.src = interceptorUrl;
     script.onload = () => {
-      console.log('%c[AI Mastermind] Network interceptor injected and loaded successfully', 'background: #4CAF50; color: white; padding: 2px 5px; border-radius: 3px;');
+      console.log('%c[Synergy AI] Network interceptor injected and loaded successfully', 'background: #4CAF50; color: white; padding: 2px 5px; border-radius: 3px;');
       script.remove(); // Clean up
     };
     script.onerror = (error) => {
-      console.error('%c[AI Mastermind] Failed to load network interceptor - this may be due to Content Security Policy (CSP) restrictions', 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;', error);
+      console.error('%c[Synergy AI] Failed to load network interceptor - this may be due to Content Security Policy (CSP) restrictions', 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;', error);
     };
     (document.head || document.documentElement).appendChild(script);
   } catch (error) {
-    console.error('%c[AI Mastermind] Error injecting interceptor script:', error, 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;');
+    console.error('%c[Synergy AI] Error injecting interceptor script:', error, 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;');
   }
 };
 
@@ -37,14 +37,21 @@ window.addEventListener('message', (event) => {
   if (event.data.type === 'NETWORK_INTERCEPTED') {
     const data = event.data.data;
 
+    // Check if extension context is still valid
+    if (!chrome.runtime?.id) {
+      // Extension context invalidated (extension was reloaded/updated)
+      // Silently ignore - this is expected during development
+      return;
+    }
+
     // Safe logging with type checking
     try {
       const requestType = typeof data.type === 'string' ? data.type.toUpperCase() : 'UNKNOWN';
       const method = data.request?.method || 'UNKNOWN';
       const url = data.request?.url || 'UNKNOWN';
-      console.log(`%c[AI Mastermind] Intercepted ${requestType} request: ${method} ${url}`, 'background: #2196F3; color: white; padding: 2px 5px; border-radius: 3px;');
+      console.log(`%c[Synergy AI] Intercepted ${requestType} request: ${method} ${url}`, 'background: #2196F3; color: white; padding: 2px 5px; border-radius: 3px;');
     } catch (err) {
-      console.error('[AI Mastermind] Error logging intercepted request:', err, data);
+      console.error('[Synergy AI] Error logging intercepted request:', err, data);
     }
 
     // Forward to background script
@@ -52,13 +59,21 @@ window.addEventListener('message', (event) => {
       type: MessageType.NETWORK_DATA_INTERCEPTED,
       payload: data
     }).catch(err => {
-      console.error('[Content] Error forwarding network data:', err);
+      // Only log if it's not a context invalidation error
+      if (!err.message?.includes('Extension context invalidated')) {
+        console.error('[Content] Error forwarding network data:', err);
+      }
     });
   }
 });
 
 // Listen for messages from background/popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Check if extension context is still valid
+  if (!chrome.runtime?.id) {
+    return false;
+  }
+
   if (message.type === MessageType.EXTRACT_JAVASCRIPT) {
     console.log('[Content] Extracting JavaScript from page...');
 
@@ -100,11 +115,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 const initializeContentScript = () => {
   // Check if already initialized
   if (document.getElementById('ai-mastermind-root')) {
-    console.log('%c[AI Mastermind] Content script already initialized', 'background: #FF9800; color: white; padding: 2px 5px; border-radius: 3px;');
+    console.log('%c[Synergy AI] Content script already initialized', 'background: #FF9800; color: white; padding: 2px 5px; border-radius: 3px;');
     return;
   }
 
-  console.log('%c[AI Mastermind] Content script initializing...', 'background: #9C27B0; color: white; padding: 2px 5px; border-radius: 3px;');
+  console.log('%c[Synergy AI] Content script initializing...', 'background: #9C27B0; color: white; padding: 2px 5px; border-radius: 3px;');
 
   // Inject network interceptor first
   injectInterceptor();
@@ -129,14 +144,14 @@ const initializeContentScript = () => {
   const root = createRoot(rootContainer);
   root.render(<ContentApp />);
 
-  console.log('AI Mastermind content script initialized');
+  console.log('Synergy AI content script initialized');
 };
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
-  console.log('%c[AI Mastermind] Waiting for DOM to load...', 'background: #673AB7; color: white; padding: 2px 5px; border-radius: 3px;');
+  console.log('%c[Synergy AI] Waiting for DOM to load...', 'background: #673AB7; color: white; padding: 2px 5px; border-radius: 3px;');
   document.addEventListener('DOMContentLoaded', initializeContentScript);
 } else {
-  console.log('%c[AI Mastermind] DOM already loaded, initializing immediately', 'background: #673AB7; color: white; padding: 2px 5px; border-radius: 3px;');
+  console.log('%c[Synergy AI] DOM already loaded, initializing immediately', 'background: #673AB7; color: white; padding: 2px 5px; border-radius: 3px;');
   initializeContentScript();
 }

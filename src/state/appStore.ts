@@ -10,6 +10,38 @@ export interface SubExtension {
   size?: { width: number; height: number };
 }
 
+export interface ClientCapability {
+  name: string;
+  description: string;
+  method: string;
+  endpoint: string;
+  parameters?: Record<string, any>;
+  inputSchema?: {
+    type: "object";
+    properties: Record<string, {
+      type: string;
+      description?: string;
+      enum?: string[];
+      items?: any;
+    }>;
+    required?: string[];
+  };
+}
+
+export interface APIClient {
+  id: string;
+  name: string;
+  description: string;
+  provider: string; // e.g., "github", "slack", "custom"
+  iconUrl?: string;
+  credentials: Record<string, string>; // API keys, tokens, etc.
+  capabilities: ClientCapability[];
+  isActive: boolean;
+  isPurchased: boolean; // true if from store, false if custom
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface MasterPlan {
   id: string;
   name: string;
@@ -69,6 +101,9 @@ interface AppState {
   plans: MasterPlan[];
   activePlanId: string | null;
 
+  // API Clients
+  clients: APIClient[];
+
   // User configuration
   userConfig: UserConfig;
 
@@ -88,6 +123,12 @@ interface AppState {
   addSubExtension: (planId: string, subExtension: SubExtension) => void;
   updateSubExtension: (planId: string, subExtId: string, updates: Partial<SubExtension>) => void;
   deleteSubExtension: (planId: string, subExtId: string) => void;
+
+  // Client actions
+  addClient: (client: APIClient) => void;
+  updateClient: (id: string, updates: Partial<APIClient>) => void;
+  deleteClient: (id: string) => void;
+  toggleClientActive: (id: string) => void;
 
   updateUserConfig: (config: Partial<UserConfig>) => void;
   consumeTokens: (amount: number) => void;
@@ -112,6 +153,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   plans: [],
   activePlanId: null,
+  clients: [],
 
   userConfig: {
     useOwnKey: false,
@@ -295,4 +337,18 @@ export const useAppStore = create<AppState>((set) => ({
       },
     ],
   }),
+
+  addClient: (client) => set((state) => ({ clients: [...state.clients, client] })),
+
+  updateClient: (id, updates) => set((state) => ({
+    clients: state.clients.map((c) => c.id === id ? { ...c, ...updates, updatedAt: Date.now() } : c),
+  })),
+
+  deleteClient: (id) => set((state) => ({
+    clients: state.clients.filter((c) => c.id !== id),
+  })),
+
+  toggleClientActive: (id) => set((state) => ({
+    clients: state.clients.map((c) => c.id === id ? { ...c, isActive: !c.isActive, updatedAt: Date.now() } : c),
+  })),
 }));

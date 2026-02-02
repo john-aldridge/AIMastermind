@@ -5,17 +5,40 @@
 
 export type AIProvider = 'openai' | 'claude';
 
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, any>;
+    required: string[];
+  };
+}
+
+export interface ToolUse {
+  id: string;
+  name: string;
+  input: Record<string, any>;
+}
+
 export interface AIRequest {
   prompt: string;
   model?: string;
   maxTokens?: number;
   systemPrompt?: string;
+  tools?: ToolDefinition[];
+  conversationHistory?: Array<{
+    role: 'user' | 'assistant';
+    content: any;
+  }>;
 }
 
 export interface AIResponse {
   content: string;
   tokensUsed: number;
   model: string;
+  toolUses?: ToolUse[];
+  stopReason?: string;
 }
 
 export interface TokenPurchaseRequest {
@@ -79,6 +102,24 @@ export class APIService {
 
   private async generateWithClaude(request: AIRequest): Promise<AIResponse> {
     try {
+      // Build messages array
+      const messages = request.conversationHistory || [
+        {
+          role: 'user' as const,
+          content: request.prompt,
+        },
+      ];
+
+      const body: any = {
+        model: request.model || this.model,
+        max_tokens: request.maxTokens || 4096,
+        messages,
+        ...(request.systemPrompt && { system: request.systemPrompt }),
+        ...(request.tools && request.tools.length > 0 && { tools: request.tools }),
+      };
+
+      console.log('[API] Calling Claude with tools:', request.tools?.length || 0);
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -87,17 +128,7 @@ export class APIService {
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },
-        body: JSON.stringify({
-          model: request.model || this.model,
-          max_tokens: request.maxTokens || 1024,
-          messages: [
-            {
-              role: 'user',
-              content: request.prompt,
-            },
-          ],
-          ...(request.systemPrompt && { system: request.systemPrompt }),
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -106,11 +137,30 @@ export class APIService {
       }
 
       const data = await response.json();
+      console.log('[API] Claude response:', data);
+
+      // Extract text content and tool uses
+      let textContent = '';
+      const toolUses: ToolUse[] = [];
+
+      for (const block of data.content) {
+        if (block.type === 'text') {
+          textContent += block.text;
+        } else if (block.type === 'tool_use') {
+          toolUses.push({
+            id: block.id,
+            name: block.name,
+            input: block.input,
+          });
+        }
+      }
 
       return {
-        content: data.content[0].text,
+        content: textContent,
         tokensUsed: data.usage.input_tokens + data.usage.output_tokens,
         model: data.model,
+        toolUses,
+        stopReason: data.stop_reason,
       };
     } catch (error) {
       console.error('Error calling Claude API:', error);
@@ -120,20 +170,38 @@ export class APIService {
 
   private async generateWithOpenAI(request: AIRequest): Promise<AIResponse> {
     try {
+      // Build messages array
+      const messages = request.conversationHistory || [
+        ...(request.systemPrompt ? [{ role: 'system', content: request.systemPrompt }] : []),
+        { role: 'user', content: request.prompt },
+      ];
+
+      // Convert tools to OpenAI format
+      const tools = request.tools?.map(tool => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema,
+        },
+      }));
+
+      const body: any = {
+        model: request.model || this.model,
+        messages,
+        max_tokens: request.maxTokens || 4096,
+        ...(tools && tools.length > 0 && { tools }),
+      };
+
+      console.log('[API] Calling OpenAI with tools:', tools?.length || 0);
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify({
-          model: request.model || this.model,
-          messages: [
-            ...(request.systemPrompt ? [{ role: 'system', content: request.systemPrompt }] : []),
-            { role: 'user', content: request.prompt },
-          ],
-          max_tokens: request.maxTokens || 1024,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -142,11 +210,28 @@ export class APIService {
       }
 
       const data = await response.json();
+      console.log('[API] OpenAI response:', data);
+
+      const message = data.choices[0].message;
+      const toolUses: ToolUse[] = [];
+
+      // Check for tool calls in OpenAI format
+      if (message.tool_calls) {
+        for (const toolCall of message.tool_calls) {
+          toolUses.push({
+            id: toolCall.id,
+            name: toolCall.function.name,
+            input: JSON.parse(toolCall.function.arguments),
+          });
+        }
+      }
 
       return {
-        content: data.choices[0].message.content,
+        content: message.content || '',
         tokensUsed: data.usage.total_tokens,
         model: data.model,
+        toolUses,
+        stopReason: data.choices[0].finish_reason,
       };
     } catch (error) {
       console.error('Error calling OpenAI API:', error);

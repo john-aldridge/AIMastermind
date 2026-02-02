@@ -1,0 +1,163 @@
+{
+  "name": "Jira",
+  "description": "MCP server for Jira - search, create, and manage issues",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "jira_search",
+      "description": "Search Jira issues using JQL (Jira Query Language)",
+      "method": "POST",
+      "endpoint": "/search",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jql": {
+            "type": "string",
+            "description": "JQL query string (e.g., 'project = PROJ AND status = Open')"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Maximum number of results to return (default: 50)"
+          },
+          "startAt": {
+            "type": "number",
+            "description": "Index of the first result to return (default: 0)"
+          }
+        },
+        "required": ["jql"]
+      }
+    },
+    {
+      "name": "jira_get_issue",
+      "description": "Retrieve detailed information about a specific Jira issue",
+      "method": "GET",
+      "endpoint": "/issue/{issueKey}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "The issue key (e.g., 'PROJ-123')"
+          },
+          "fields": {
+            "type": "string",
+            "description": "Comma-separated list of fields to include (optional)"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_create_issue",
+      "description": "Create a new Jira issue",
+      "method": "POST",
+      "endpoint": "/issue",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project key (e.g., 'PROJ')"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Issue summary/title"
+          },
+          "description": {
+            "type": "string",
+            "description": "Issue description"
+          },
+          "issueType": {
+            "type": "string",
+            "description": "Issue type (e.g., 'Bug', 'Task', 'Story')"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority level (e.g., 'High', 'Medium', 'Low')"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "Assignee username or account ID (optional)"
+          }
+        },
+        "required": ["project", "summary", "issueType"]
+      }
+    },
+    {
+      "name": "jira_update_issue",
+      "description": "Update an existing Jira issue",
+      "method": "PUT",
+      "endpoint": "/issue/{issueKey}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "The issue key (e.g., 'PROJ-123')"
+          },
+          "summary": {
+            "type": "string",
+            "description": "New summary/title (optional)"
+          },
+          "description": {
+            "type": "string",
+            "description": "New description (optional)"
+          },
+          "priority": {
+            "type": "string",
+            "description": "New priority level (optional)"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "New assignee (optional)"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_transition_issue",
+      "description": "Change the status of a Jira issue (e.g., Open -> In Progress)",
+      "method": "POST",
+      "endpoint": "/issue/{issueKey}/transitions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "The issue key (e.g., 'PROJ-123')"
+          },
+          "transitionId": {
+            "type": "string",
+            "description": "The ID of the transition to perform"
+          },
+          "transitionName": {
+            "type": "string",
+            "description": "The name of the transition (alternative to transitionId)"
+          },
+          "comment": {
+            "type": "string",
+            "description": "Optional comment to add during transition"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_get_issue_sla",
+      "description": "Calculate and retrieve SLA metrics for a Jira issue",
+      "method": "GET",
+      "endpoint": "/issue/{issueKey}/sla",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "The issue key (e.g., 'PROJ-123')"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    }
+  ]
+}

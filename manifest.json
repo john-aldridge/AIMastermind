@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "AI Mastermind",
+  "name": "Synergy AI",
   "version": "1.0.0",
   "description": "Create and manage AI-powered draggable widgets on any webpage",
   "permissions": [
@@ -19,7 +19,7 @@
     "<all_urls>"
   ],
   "action": {
-    "default_title": "AI Mastermind"
+    "default_title": "Synergy AI"
   },
   "side_panel": {
     "default_path": "src/sidepanel/index.html"
@@ -32,7 +32,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content/index.js"],
-      "css": ["assets/globals.css"],
+      "css": ["assets/style.css"],
       "run_at": "document_idle"
     }
   ],

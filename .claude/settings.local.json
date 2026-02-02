@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(tree:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(npm install)",
+      "Bash(npm run build:*)",
+      "Bash(node scripts/create-placeholder-icons.js:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd multi-provider support and side panel UI\n\nMajor Features:\n- Add side panel mode as default UI \\(Chrome 114+\\)\n- Support for 17 AI providers \\(Claude, OpenAI, Google, Groq, etc.\\)\n- Flexible authentication system for any provider type\n- User preference for popup vs side panel mode\n- Inline notifications instead of popups\n- Vertical condensed provider list UI\n\nProvider System:\n- Dynamic provider configuration in src/utils/providers.ts\n- 17 providers: Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, Cohere, Mistral, DeepSeek, xAI, Perplexity, Replicate, Hugging Face, Together AI, Fireworks, Anyscale, AI21, Azure OpenAI\n- Auto-adapting auth forms based on provider requirements\n- Support for API keys, multi-field auth, custom endpoints\n- Model selection with pricing information\n\nSide Panel Implementation:\n- New side panel UI \\(src/sidepanel/\\)\n- Persistent across tabs and pages\n- Full browser height, resizable width\n- Smart icon click handler in background script\n- Mode switcher in Settings \\(ViewModeSettings component\\)\n- User preference stored and remembered\n\nUI/UX Improvements:\n- Inline success/error notifications \\(no popups\\)\n- Vertical provider list instead of grid\n- Enhanced settings with provider cards\n- Mode indicators showing current view\n- Seamless switching between popup and side panel\n\nAuthentication:\n- Claude API with anthropic-dangerous-direct-browser-access header\n- OpenAI API support\n- Flexible credential storage \\(Record<string, string>\\)\n- Provider-specific validation with detailed errors\n\nDocumentation:\n- docs/CLAUDE_API_SETUP.md - Claude API setup guide\n- docs/MULTI_PROVIDER_SYSTEM.md - Architecture documentation\n- docs/SIDE_PANEL_GUIDE.md - Side panel usage guide\n- docs/SUPPORTED_PROVIDERS.md - Full provider list\n- QUICK_START.md - Quick start with Claude\n- WHATS_NEW.md - Multi-provider update summary\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "WebSearch",
+      "WebFetch(domain:developer.chrome.com)",
+      "Bash(git rm:*)",
+      "Bash(git push:*)",
+      "Bash(npm uninstall:*)",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__list_console_messages",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:developer.atlassian.com)"
     ]
   }
 }

@@ -1,6 +1,6 @@
 # Supported AI Providers
 
-AI Mastermind supports **20+ AI providers** with a flexible authentication system that adapts to each provider's requirements.
+Synergy AI supports **20+ AI providers** with a flexible authentication system that adapts to each provider's requirements.
 
 ## 🌟 Popular Providers
 

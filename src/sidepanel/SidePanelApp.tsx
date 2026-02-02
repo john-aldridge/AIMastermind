@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '@/state/appStore';
-import { ChatView } from '@/popup/components/ChatView';
-import { PlansView } from '@/popup/components/PlansView';
-import { SettingsView } from '@/popup/components/SettingsView';
-import { CreatePlanModal } from '@/popup/components/CreatePlanModal';
+import { ChatView } from './components/ChatView';
+import { PlansView } from './components/PlansView';
+import { ClientsView } from './components/ClientsView';
+import { SettingsView } from './components/SettingsView';
+import { CreatePlanModal } from './components/CreatePlanModal';
 import { sendToBackground } from '@/utils/messaging';
 import { MessageType } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
 import { networkMonitor } from '@/utils/networkMonitor';
+import { registerAllClients } from '@/clients';
 
-type View = 'chat' | 'plans' | 'settings';
+type View = 'chat' | 'plugins' | 'clients' | 'settings';
 
 export const SidePanelApp: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
@@ -18,6 +20,9 @@ export const SidePanelApp: React.FC = () => {
   const { plans, userConfig, updateUserConfig, chatMessages } = useAppStore();
 
   useEffect(() => {
+    // Register all built-in clients
+    registerAllClients();
+
     // Load state from storage on mount
     loadState();
   }, []);
@@ -87,14 +92,7 @@ export const SidePanelApp: React.FC = () => {
   return (
     <div className="h-screen flex flex-col bg-gray-50 min-w-[400px] max-w-[600px]">
       {/* Header */}
-      <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white p-4 shadow-lg flex-shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-bold">AI Mastermind</h1>
-          <div className="text-xs">
-            <span className="font-semibold">{userConfig.tokenBalance}</span> tokens
-          </div>
-        </div>
-
+      <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white p-3 shadow-lg flex-shrink-0">
         {/* Navigation */}
         <div className="flex gap-2">
           <button
@@ -108,14 +106,24 @@ export const SidePanelApp: React.FC = () => {
             Chat
           </button>
           <button
-            onClick={() => setCurrentView('plans')}
+            onClick={() => setCurrentView('plugins')}
             className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-              currentView === 'plans'
+              currentView === 'plugins'
                 ? 'bg-white text-primary-700'
                 : 'bg-primary-500 hover:bg-primary-400 text-white'
             }`}
           >
-            Plans
+            Plugins
+          </button>
+          <button
+            onClick={() => setCurrentView('clients')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+              currentView === 'clients'
+                ? 'bg-white text-primary-700'
+                : 'bg-primary-500 hover:bg-primary-400 text-white'
+            }`}
+          >
+            Clients
           </button>
           <button
             onClick={() => setCurrentView('settings')}
@@ -134,9 +142,14 @@ export const SidePanelApp: React.FC = () => {
       {/* Content - Scrollable */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {currentView === 'chat' && <ChatView />}
-        {currentView === 'plans' && (
+        {currentView === 'plugins' && (
           <div className="overflow-auto flex-1">
             <PlansView onCreatePlan={() => setShowCreateModal(true)} />
+          </div>
+        )}
+        {currentView === 'clients' && (
+          <div className="overflow-auto flex-1">
+            <ClientsView />
           </div>
         )}
         {currentView === 'settings' && (

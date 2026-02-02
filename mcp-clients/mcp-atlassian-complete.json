@@ -1,0 +1,669 @@
+{
+  "name": "Atlassian (Jira & Confluence)",
+  "description": "Complete MCP server for Atlassian tools - based on sooperset/mcp-atlassian. Supports Jira issue management, agile boards, sprints, and Confluence page management.",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "jira_search",
+      "description": "Execute JQL queries to find issues matching specified criteria. Supports complex filtering, field selection, and pagination.",
+      "method": "POST",
+      "endpoint": "/rest/api/3/search",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jql": {
+            "type": "string",
+            "description": "JQL query string (e.g., 'project = PROJ AND status = Open')"
+          },
+          "fields": {
+            "type": "string",
+            "description": "Comma-separated list of fields to return (optional)"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Maximum number of results (1-100, default: 50)"
+          },
+          "startAt": {
+            "type": "number",
+            "description": "Starting index for pagination (default: 0)"
+          },
+          "expand": {
+            "type": "string",
+            "description": "Fields to expand (e.g., 'changelog,renderedFields')"
+          }
+        },
+        "required": ["jql"]
+      }
+    },
+    {
+      "name": "jira_get_issue",
+      "description": "Fetch detailed information about a specific Jira issue including epic links, relationships, comments, and history.",
+      "method": "GET",
+      "endpoint": "/rest/api/3/issue/{issueKey}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key (e.g., 'PROJ-123')"
+          },
+          "fields": {
+            "type": "string",
+            "description": "Comma-separated field names to return"
+          },
+          "expand": {
+            "type": "string",
+            "description": "Fields to expand (e.g., 'changelog,transitions')"
+          },
+          "commentLimit": {
+            "type": "number",
+            "description": "Maximum number of comments to return"
+          },
+          "updateHistory": {
+            "type": "boolean",
+            "description": "Include issue update history"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_create_issue",
+      "description": "Create a new Jira issue with optional epic linking and custom fields.",
+      "method": "POST",
+      "endpoint": "/rest/api/3/issue",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectKey": {
+            "type": "string",
+            "description": "Project key (e.g., 'PROJ')"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Issue summary/title"
+          },
+          "issueType": {
+            "type": "string",
+            "description": "Issue type (e.g., 'Bug', 'Task', 'Story')"
+          },
+          "description": {
+            "type": "string",
+            "description": "Issue description (supports ADF or markdown)"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "Assignee username or account ID"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority name (e.g., 'High', 'Medium', 'Low')"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of component names"
+          },
+          "epicKey": {
+            "type": "string",
+            "description": "Epic key to link this issue to"
+          },
+          "additionalFields": {
+            "type": "object",
+            "description": "Additional custom fields as key-value pairs"
+          }
+        },
+        "required": ["projectKey", "summary", "issueType"]
+      }
+    },
+    {
+      "name": "jira_update_issue",
+      "description": "Modify existing issue fields, status, attachments, and custom field values.",
+      "method": "PUT",
+      "endpoint": "/rest/api/3/issue/{issueKey}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key to update"
+          },
+          "summary": {
+            "type": "string",
+            "description": "New summary"
+          },
+          "description": {
+            "type": "string",
+            "description": "New description"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "New assignee"
+          },
+          "priority": {
+            "type": "string",
+            "description": "New priority"
+          },
+          "fields": {
+            "type": "object",
+            "description": "Fields to update as key-value pairs"
+          },
+          "additionalFields": {
+            "type": "object",
+            "description": "Additional custom fields"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File paths to attach"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_transition_issue",
+      "description": "Move an issue to a different workflow status (e.g., Open → In Progress → Done).",
+      "method": "POST",
+      "endpoint": "/rest/api/3/issue/{issueKey}/transitions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key to transition"
+          },
+          "transitionId": {
+            "type": "string",
+            "description": "Transition ID (get from jira_get_transitions)"
+          },
+          "comment": {
+            "type": "string",
+            "description": "Optional comment to add during transition"
+          },
+          "fields": {
+            "type": "object",
+            "description": "Fields to set during transition"
+          }
+        },
+        "required": ["issueKey", "transitionId"]
+      }
+    },
+    {
+      "name": "jira_add_comment",
+      "description": "Add a comment to a Jira issue with optional visibility restrictions.",
+      "method": "POST",
+      "endpoint": "/rest/api/3/issue/{issueKey}/comment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key to comment on"
+          },
+          "comment": {
+            "type": "string",
+            "description": "Comment text (supports ADF or markdown)"
+          },
+          "visibility": {
+            "type": "object",
+            "description": "Visibility restrictions (role or group)"
+          }
+        },
+        "required": ["issueKey", "comment"]
+      }
+    },
+    {
+      "name": "jira_delete_issue",
+      "description": "Permanently remove a Jira issue. This action cannot be undone.",
+      "method": "DELETE",
+      "endpoint": "/rest/api/3/issue/{issueKey}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key to delete"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_get_transitions",
+      "description": "List all available status transitions for a specific issue based on workflow.",
+      "method": "GET",
+      "endpoint": "/rest/api/3/issue/{issueKey}/transitions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_get_agile_boards",
+      "description": "Retrieve agile boards (Scrum/Kanban) with optional filtering by name, project, or type.",
+      "method": "GET",
+      "endpoint": "/rest/agile/1.0/board",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "boardName": {
+            "type": "string",
+            "description": "Filter by board name (partial match)"
+          },
+          "projectKey": {
+            "type": "string",
+            "description": "Filter by project key"
+          },
+          "boardType": {
+            "type": "string",
+            "enum": ["scrum", "kanban"],
+            "description": "Filter by board type"
+          },
+          "startAt": {
+            "type": "number",
+            "description": "Starting index for pagination"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Maximum results to return"
+          }
+        }
+      }
+    },
+    {
+      "name": "jira_get_sprints_from_board",
+      "description": "Retrieve all sprints associated with a specific agile board.",
+      "method": "GET",
+      "endpoint": "/rest/agile/1.0/board/{boardId}/sprint",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "boardId": {
+            "type": "string",
+            "description": "Board ID"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["active", "future", "closed"],
+            "description": "Filter sprints by state"
+          },
+          "startAt": {
+            "type": "number",
+            "description": "Starting index"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Maximum results"
+          }
+        },
+        "required": ["boardId"]
+      }
+    },
+    {
+      "name": "jira_get_sprint_issues",
+      "description": "Get all issues contained within a specific sprint.",
+      "method": "GET",
+      "endpoint": "/rest/agile/1.0/sprint/{sprintId}/issue",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sprintId": {
+            "type": "string",
+            "description": "Sprint ID"
+          },
+          "fields": {
+            "type": "string",
+            "description": "Comma-separated field names"
+          },
+          "startAt": {
+            "type": "number",
+            "description": "Starting index"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Maximum results"
+          }
+        },
+        "required": ["sprintId"]
+      }
+    },
+    {
+      "name": "jira_create_sprint",
+      "description": "Create a new sprint for an agile board with start/end dates and goals.",
+      "method": "POST",
+      "endpoint": "/rest/agile/1.0/sprint",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "boardId": {
+            "type": "string",
+            "description": "Board ID to create sprint in"
+          },
+          "sprintName": {
+            "type": "string",
+            "description": "Sprint name"
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Sprint start date (ISO 8601)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Sprint end date (ISO 8601)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Sprint goal/objective"
+          }
+        },
+        "required": ["boardId", "sprintName"]
+      }
+    },
+    {
+      "name": "jira_get_issue_sla",
+      "description": "Calculate SLA metrics and workflow timing for performance analysis.",
+      "method": "GET",
+      "endpoint": "/rest/api/3/issue/{issueKey}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key"
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific SLA metrics to calculate"
+          },
+          "workingHoursOnly": {
+            "type": "boolean",
+            "description": "Calculate based on business hours only"
+          }
+        },
+        "required": ["issueKey"]
+      }
+    },
+    {
+      "name": "jira_get_all_projects",
+      "description": "List all Jira projects accessible to the current user.",
+      "method": "GET",
+      "endpoint": "/rest/api/3/project",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeArchived": {
+            "type": "boolean",
+            "description": "Include archived projects in results"
+          }
+        }
+      }
+    },
+    {
+      "name": "jira_add_worklog",
+      "description": "Log time spent working on an issue for time tracking and reporting.",
+      "method": "POST",
+      "endpoint": "/rest/api/3/issue/{issueKey}/worklog",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issueKey": {
+            "type": "string",
+            "description": "Issue key"
+          },
+          "timeSpent": {
+            "type": "string",
+            "description": "Time spent (e.g., '3h 30m', '2d', '1w 4h')"
+          },
+          "comment": {
+            "type": "string",
+            "description": "Work description"
+          },
+          "started": {
+            "type": "string",
+            "description": "When work started (ISO 8601)"
+          }
+        },
+        "required": ["issueKey", "timeSpent"]
+      }
+    },
+    {
+      "name": "confluence_search",
+      "description": "Search Confluence content using simple terms or CQL (Confluence Query Language).",
+      "method": "GET",
+      "endpoint": "/wiki/rest/api/content/search",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query - simple text or CQL string"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results (1-50, default: 10)"
+          },
+          "spacesFilter": {
+            "type": "string",
+            "description": "Comma-separated space keys to filter"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "confluence_get_page",
+      "description": "Get content of a specific Confluence page by ID or by title and space key.",
+      "method": "GET",
+      "endpoint": "/wiki/rest/api/content/{pageId}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "description": "Numeric page ID from URL"
+          },
+          "title": {
+            "type": "string",
+            "description": "Page title (alternative to pageId)"
+          },
+          "spaceKey": {
+            "type": "string",
+            "description": "Space key (required with title)"
+          },
+          "includeMetadata": {
+            "type": "boolean",
+            "description": "Include creation date, updates, version, labels (default: true)"
+          },
+          "convertToMarkdown": {
+            "type": "boolean",
+            "description": "Convert content to markdown vs raw HTML (default: true)"
+          }
+        }
+      }
+    },
+    {
+      "name": "confluence_create_page",
+      "description": "Create a new Confluence page with markdown, wiki, or storage format content.",
+      "method": "POST",
+      "endpoint": "/wiki/rest/api/content",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "spaceKey": {
+            "type": "string",
+            "description": "Space key (e.g., 'DEV', 'TEAM')"
+          },
+          "title": {
+            "type": "string",
+            "description": "Page title"
+          },
+          "content": {
+            "type": "string",
+            "description": "Page content"
+          },
+          "parentId": {
+            "type": "string",
+            "description": "Parent page ID (optional)"
+          },
+          "contentFormat": {
+            "type": "string",
+            "enum": ["markdown", "wiki", "storage"],
+            "description": "Content format (default: markdown)"
+          },
+          "enableHeadingAnchors": {
+            "type": "boolean",
+            "description": "Auto-generate heading anchors for markdown"
+          },
+          "emoji": {
+            "type": "string",
+            "description": "Page title emoji icon"
+          }
+        },
+        "required": ["spaceKey", "title", "content"]
+      }
+    },
+    {
+      "name": "confluence_update_page",
+      "description": "Update an existing Confluence page with new title, content, or parent.",
+      "method": "PUT",
+      "endpoint": "/wiki/rest/api/content/{pageId}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "description": "Page ID to update"
+          },
+          "title": {
+            "type": "string",
+            "description": "New page title"
+          },
+          "content": {
+            "type": "string",
+            "description": "New page content"
+          },
+          "isMinorEdit": {
+            "type": "boolean",
+            "description": "Mark as minor edit (default: false)"
+          },
+          "versionComment": {
+            "type": "string",
+            "description": "Version comment describing changes"
+          },
+          "contentFormat": {
+            "type": "string",
+            "enum": ["markdown", "wiki", "storage"],
+            "description": "Content format (default: markdown)"
+          }
+        },
+        "required": ["pageId", "title", "content"]
+      }
+    },
+    {
+      "name": "confluence_delete_page",
+      "description": "Delete an existing Confluence page permanently.",
+      "method": "DELETE",
+      "endpoint": "/wiki/rest/api/content/{pageId}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "description": "Page ID to delete"
+          }
+        },
+        "required": ["pageId"]
+      }
+    },
+    {
+      "name": "confluence_add_comment",
+      "description": "Add a comment to a Confluence page in markdown format.",
+      "method": "POST",
+      "endpoint": "/wiki/rest/api/content/{pageId}/child/comment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "description": "Page ID to comment on"
+          },
+          "content": {
+            "type": "string",
+            "description": "Comment content (markdown format)"
+          }
+        },
+        "required": ["pageId", "content"]
+      }
+    },
+    {
+      "name": "confluence_get_comments",
+      "description": "Retrieve all comments for a specific Confluence page.",
+      "method": "GET",
+      "endpoint": "/wiki/rest/api/content/{pageId}/child/comment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "description": "Page ID"
+          }
+        },
+        "required": ["pageId"]
+      }
+    },
+    {
+      "name": "confluence_add_label",
+      "description": "Add a label/tag to a Confluence page for categorization.",
+      "method": "POST",
+      "endpoint": "/wiki/rest/api/content/{pageId}/label",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "description": "Page ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Label name"
+          }
+        },
+        "required": ["pageId", "name"]
+      }
+    },
+    {
+      "name": "confluence_get_page_views",
+      "description": "Get view statistics for a Confluence page (Cloud only).",
+      "method": "GET",
+      "endpoint": "/wiki/rest/api/analytics/content/{pageId}/views",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "description": "Page ID"
+          },
+          "includeTitle": {
+            "type": "boolean",
+            "description": "Fetch and include page title (default: true)"
+          }
+        },
+        "required": ["pageId"]
+      }
+    }
+  ]
+}

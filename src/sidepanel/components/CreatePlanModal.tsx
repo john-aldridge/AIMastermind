@@ -14,7 +14,7 @@ export const CreatePlanModal: React.FC<CreatePlanModalProps> = ({ onClose }) => 
     e.preventDefault();
 
     if (!name.trim()) {
-      alert('Please enter a plan name');
+      alert('Please enter a plugin name');
       return;
     }
 
@@ -34,12 +34,12 @@ export const CreatePlanModal: React.FC<CreatePlanModalProps> = ({ onClose }) => 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-[350px] shadow-xl">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">Create Master Plan</h2>
+        <h2 className="text-xl font-bold text-gray-800 mb-4">Create Master Plugin</h2>
 
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Plan Name
+              Plugin Name
             </label>
             <input
               type="text"
@@ -58,7 +58,7 @@ export const CreatePlanModal: React.FC<CreatePlanModalProps> = ({ onClose }) => 
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What is this plan for?"
+              placeholder="What is this plugin for?"
               className="input-field resize-none"
               rows={3}
             />
@@ -66,7 +66,7 @@ export const CreatePlanModal: React.FC<CreatePlanModalProps> = ({ onClose }) => 
 
           <div className="flex gap-2">
             <button type="submit" className="btn-primary flex-1">
-              Create Plan
+              Create Plugin
             </button>
             <button
               type="button"

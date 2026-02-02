@@ -1,6 +1,6 @@
-# Setting Up Claude API for AI Mastermind
+# Setting Up Claude API for Synergy AI
 
-This guide will help you set up your Claude API key to use with AI Mastermind.
+This guide will help you set up your Claude API key to use with Synergy AI.
 
 ## Step 1: Get Your Claude API Key
 
@@ -13,7 +13,7 @@ This guide will help you set up your Claude API key to use with AI Mastermind.
 2. **Create an API Key**
    - Navigate to "API Keys" in the left sidebar
    - Click "Create Key"
-   - Give your key a name (e.g., "AI Mastermind Extension")
+   - Give your key a name (e.g., "Synergy AI Extension")
    - Copy the key immediately (you won't be able to see it again!)
 
 3. **Save Your Key Securely**
@@ -26,12 +26,12 @@ Claude API keys start with `sk-ant-` followed by a long string of characters.
 
 Example format: `sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
 
-## Step 2: Configure AI Mastermind
+## Step 2: Configure Synergy AI
 
 ### In the Extension
 
 1. **Open the Extension Popup**
-   - Click the AI Mastermind icon in your Chrome toolbar
+   - Click the Synergy AI icon in your Chrome toolbar
 
 2. **Go to Settings**
    - Click the "Settings" tab in the popup

@@ -29,22 +29,23 @@ export default defineConfig({
           resolve: {
             alias: {
               '@': resolve(__dirname, './src'),
+              '@mcp-clients': resolve(__dirname, './mcp-clients'),
             },
           },
           build: {
-            outDir: 'dist/content',
+            outDir: 'dist',
             emptyOutDir: false,
             minify: false,
             lib: {
               entry: resolve(__dirname, 'src/content/index.tsx'),
               name: 'ContentScript',
               formats: ['iife'],
-              fileName: () => 'index.js',
+              fileName: () => 'content/index.js',
             },
             rollupOptions: {
-              external: [/\.css$/],
               output: {
                 extend: true,
+                assetFileNames: 'assets/[name].[ext]',
                 globals: {
                   react: 'React',
                   'react-dom': 'ReactDOM',
@@ -83,6 +84,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
+      '@mcp-clients': resolve(__dirname, './mcp-clients'),
     },
   },
   build: {
@@ -90,7 +92,6 @@ export default defineConfig({
     minify: false, // Disable minify for easier debugging
     rollupOptions: {
       input: {
-        popup: resolve(__dirname, 'src/popup/index.html'),
         sidepanel: resolve(__dirname, 'src/sidepanel/index.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
       },

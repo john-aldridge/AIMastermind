@@ -31,7 +31,7 @@ export const PlanCard: React.FC<PlanCardProps> = ({ plan }) => {
   };
 
   const handleDelete = () => {
-    if (confirm(`Delete plan "${plan.name}"?`)) {
+    if (confirm(`Delete plugin "${plan.name}"?`)) {
       deletePlan(plan.id);
     }
   };

@@ -1,7 +1,7 @@
 {
   "name": "ai-mastermind",
   "version": "1.0.0",
-  "description": "AI Mastermind Chrome Extension - Create draggable AI-powered widgets on any webpage",
+  "description": "Synergy AI Chrome Extension - Create draggable AI-powered widgets on any webpage",
   "type": "module",
   "scripts": {
     "dev": "vite",

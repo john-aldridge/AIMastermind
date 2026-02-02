@@ -12,12 +12,12 @@ export const PlansView: React.FC<PlansViewProps> = ({ onCreatePlan }) => {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-800">Master Plans</h2>
+        <h2 className="text-lg font-semibold text-gray-800">Master Plugins</h2>
         <button
           onClick={onCreatePlan}
           className="btn-primary text-sm py-1.5 px-3"
         >
-          + New Plan
+          + New Plugin
         </button>
       </div>
 
@@ -38,12 +38,12 @@ export const PlansView: React.FC<PlansViewProps> = ({ onCreatePlan }) => {
               />
             </svg>
           </div>
-          <p className="text-gray-500 mb-2">No master plans yet</p>
+          <p className="text-gray-500 mb-2">No master plugins yet</p>
           <p className="text-sm text-gray-400 mb-4">
-            Create a plan to organize your AI-powered widgets
+            Create a plugin to organize your AI-powered widgets
           </p>
           <button onClick={onCreatePlan} className="btn-primary">
-            Create Your First Plan
+            Create Your First Plugin
           </button>
         </div>
       ) : (

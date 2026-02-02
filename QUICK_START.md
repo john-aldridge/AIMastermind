@@ -1,4 +1,4 @@
-# Quick Start Guide - AI Mastermind with Claude
+# Quick Start Guide - Synergy AI with Claude
 
 ## 🚀 Using Your Own Claude API Key
 
@@ -12,7 +12,7 @@
 
 ### Step 2: Configure the Extension
 
-1. **Open AI Mastermind**
+1. **Open Synergy AI**
    - Click the extension icon in Chrome
 
 2. **Go to Settings Tab**

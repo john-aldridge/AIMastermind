@@ -2,7 +2,7 @@
 
 ## Overview
 
-AI Mastermind now supports **both Side Panel and Popup modes**, with Side Panel as the default for the best experience!
+Synergy AI now supports **both Side Panel and Popup modes**, with Side Panel as the default for the best experience!
 
 ## 🎯 Side Panel Mode (Default & Recommended)
 
@@ -43,7 +43,7 @@ The Side Panel opens **alongside your browser** - similar to Chrome DevTools, bo
 2. **Re-opening**:
    - Click extension icon again
    - Or: Right-click icon → "Open side panel"
-   - Or: Use Chrome menu → "AI Mastermind" side panel
+   - Or: Use Chrome menu → "Synergy AI" side panel
 
 3. **Resizing**:
    - Drag the left edge to resize
@@ -248,7 +248,7 @@ Both views are fully responsive:
 
 **Reload Extension**:
 1. Go to `chrome://extensions/`
-2. Click refresh on AI Mastermind
+2. Click refresh on Synergy AI
 3. Try again
 
 ## 🚀 Future Enhancements

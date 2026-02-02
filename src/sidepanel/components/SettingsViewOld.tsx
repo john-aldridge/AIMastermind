@@ -211,7 +211,7 @@ export const SettingsView: React.FC = () => {
           </div>
         ) : (
           <p className="text-sm text-gray-600">
-            Using AI Mastermind tokens. Purchase more below.
+            Using Synergy AI tokens. Purchase more below.
           </p>
         )}
       </div>

@@ -71,7 +71,7 @@ Changed from grid layout to a clean vertical list:
 
 ## 🎯 How to Use
 
-1. **Reload Extension**: `chrome://extensions/` → refresh AI Mastermind
+1. **Reload Extension**: `chrome://extensions/` → refresh Synergy AI
 2. **Open Settings** tab
 3. **Toggle "Use Own API Key"**
 4. **Browse providers** in the new vertical list

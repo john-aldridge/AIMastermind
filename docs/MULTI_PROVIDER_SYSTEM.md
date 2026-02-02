@@ -2,7 +2,7 @@
 
 ## Overview
 
-AI Mastermind now supports **20+ AI providers** with a flexible, data-driven authentication system that can adapt to ANY provider's authentication requirements.
+Synergy AI now supports **20+ AI providers** with a flexible, data-driven authentication system that can adapt to ANY provider's authentication requirements.
 
 ## What We Built
 

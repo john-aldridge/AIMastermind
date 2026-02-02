@@ -17,7 +17,7 @@ export const TOKEN_PACKAGES: TokenPackage[] = [
     name: 'Starter Pack',
     tokens: 10000,
     price: 4.99,
-    description: 'Perfect for trying out AI Mastermind',
+    description: 'Perfect for trying out Synergy AI',
   },
   {
     id: 'standard',

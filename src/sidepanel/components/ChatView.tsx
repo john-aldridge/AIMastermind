@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore, ChatMessage } from '@/state/appStore';
-import { apiService } from '@/utils/api';
+import { apiService, ToolDefinition } from '@/utils/api';
 import { MessageType } from '@/utils/messaging';
 import { FileAnalysis } from './FileAnalysis';
+import { ClientRegistry } from '@/clients';
 
 interface TabContext {
   tabId: number;
@@ -29,6 +30,7 @@ export const ChatView: React.FC = () => {
   const [showTabSelector, setShowTabSelector] = useState(false);
   const [showFileAnalysis, setShowFileAnalysis] = useState(false);
   const [currentFile, setCurrentFile] = useState<{ name: string; content: string; info: DownloadInfo } | null>(null);
+  const [availableTools, setAvailableTools] = useState<ToolDefinition[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
@@ -36,9 +38,10 @@ export const ChatView: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Capture context from all tabs
+  // Capture context from all tabs and load tools
   useEffect(() => {
     captureAllTabs();
+    loadAvailableTools();
   }, []);
 
   // Re-capture tabs when window regains focus
@@ -106,6 +109,76 @@ export const ChatView: React.FC = () => {
     }
   };
 
+  const loadAvailableTools = async () => {
+    try {
+      console.log('[ChatView] Loading available tools from configured clients...');
+      const tools: ToolDefinition[] = [];
+
+      // Get all registered client IDs
+      const clientIds = ClientRegistry.getAllIds();
+      console.log('[ChatView] Found registered clients:', clientIds);
+
+      for (const clientId of clientIds) {
+        // Check if client is configured
+        const storageKey = `client:${clientId}`;
+        const data = await chrome.storage.local.get(storageKey);
+        const clientConfig = data[storageKey];
+
+        if (!clientConfig?.credentials || !clientConfig.isActive) {
+          console.log(`[ChatView] Client ${clientId} not configured or not active, skipping`);
+          continue;
+        }
+
+        console.log(`[ChatView] Loading tools from ${clientId}...`);
+
+        // Get client instance and load credentials
+        const clientInstance = ClientRegistry.getInstance(clientId);
+        if (!clientInstance) {
+          console.warn(`[ChatView] Could not get instance for ${clientId}`);
+          continue;
+        }
+
+        clientInstance.setCredentials(clientConfig.credentials);
+
+        // Get capabilities and convert to tool definitions
+        const capabilities = clientInstance.getCapabilities();
+        console.log(`[ChatView] Client ${clientId} has ${capabilities.length} capabilities`);
+
+        for (const capability of capabilities) {
+          const properties: Record<string, any> = {};
+          const required: string[] = [];
+
+          for (const param of capability.parameters) {
+            properties[param.name] = {
+              type: param.type,
+              description: param.description,
+              ...(param.default !== undefined && { default: param.default }),
+            };
+
+            if (param.required) {
+              required.push(param.name);
+            }
+          }
+
+          tools.push({
+            name: capability.name,
+            description: capability.description,
+            input_schema: {
+              type: 'object',
+              properties,
+              required,
+            },
+          });
+        }
+      }
+
+      console.log(`[ChatView] Loaded ${tools.length} tools total:`, tools.map(t => t.name));
+      setAvailableTools(tools);
+    } catch (error) {
+      console.error('[ChatView] Error loading tools:', error);
+    }
+  };
+
   const toggleTabSelection = (tabId: number) => {
     setTabs(tabs.map(tab =>
       tab.tabId === tabId ? { ...tab, selected: !tab.selected } : tab
@@ -121,6 +194,41 @@ export const ChatView: React.FC = () => {
     return selectedTabs.map(tab =>
       `=== Tab: ${tab.title} ===\nURL: ${tab.url}\n\nContent:\n${tab.content}`
     ).join('\n\n---\n\n');
+  };
+
+  const executeToolCall = async (toolName: string, toolInput: Record<string, any>): Promise<any> => {
+    console.log(`[ChatView] Executing tool: ${toolName}`, toolInput);
+
+    // Find which client owns this tool
+    const clientIds = ClientRegistry.getAllIds();
+    for (const clientId of clientIds) {
+      const clientInstance = ClientRegistry.getInstance(clientId);
+      if (!clientInstance) continue;
+
+      const capabilities = clientInstance.getCapabilities();
+      const capability = capabilities.find(c => c.name === toolName);
+
+      if (capability) {
+        console.log(`[ChatView] Tool ${toolName} belongs to client ${clientId}`);
+
+        // Load credentials from storage
+        const storageKey = `client:${clientId}`;
+        const data = await chrome.storage.local.get(storageKey);
+        const clientConfig = data[storageKey];
+
+        if (clientConfig?.credentials) {
+          clientInstance.setCredentials(clientConfig.credentials);
+          await clientInstance.initialize();
+        }
+
+        // Execute the capability
+        const result = await clientInstance.executeCapability(toolName, toolInput);
+        console.log(`[ChatView] Tool ${toolName} result:`, result);
+        return result;
+      }
+    }
+
+    throw new Error(`Tool ${toolName} not found in any configured client`);
   };
 
   const handleSend = async () => {
@@ -222,24 +330,104 @@ export const ChatView: React.FC = () => {
         contextPrompt += userMessage.content;
       }
 
-      // Call API service
-      const response = await apiService.generateContent(
-        { prompt: contextPrompt },
-        userConfig.useOwnKey
-      );
+      // Build conversation history for agentic loop
+      const conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }> = [
+        { role: 'user', content: contextPrompt },
+      ];
+
+      let finalResponse = '';
+      let totalTokens = 0;
+      const maxIterations = 5; // Prevent infinite loops
+      let iteration = 0;
+
+      // Agentic loop: keep calling LLM until it stops using tools
+      while (iteration < maxIterations) {
+        iteration++;
+        console.log(`[ChatView] Agentic loop iteration ${iteration}`);
+
+        // Call API service with tools
+        const response = await apiService.generateContent(
+          {
+            prompt: '', // Not used when conversationHistory is provided
+            conversationHistory,
+            tools: availableTools.length > 0 ? availableTools : undefined,
+            systemPrompt: availableTools.length > 0
+              ? 'You are a helpful AI assistant with access to Jira and Confluence APIs. When the user asks about issues, projects, pages, or documentation, use the available tools to fetch real data. Always explain what you\'re doing and present the results clearly.'
+              : undefined,
+          },
+          userConfig.useOwnKey
+        );
+
+        totalTokens += response.tokensUsed;
+        finalResponse = response.content;
+
+        // If no tool uses, we're done
+        if (!response.toolUses || response.toolUses.length === 0) {
+          console.log('[ChatView] No tool uses, conversation complete');
+          break;
+        }
+
+        // Execute all tool calls
+        console.log(`[ChatView] Executing ${response.toolUses.length} tool calls`);
+        const toolResults: any[] = [];
+
+        for (const toolUse of response.toolUses) {
+          try {
+            const result = await executeToolCall(toolUse.name, toolUse.input);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: JSON.stringify(result, null, 2),
+            });
+          } catch (error) {
+            console.error(`[ChatView] Tool ${toolUse.name} failed:`, error);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: `Error: ${error instanceof Error ? error.message : 'Tool execution failed'}`,
+              is_error: true,
+            });
+          }
+        }
+
+        // Add assistant message with tool uses to history
+        const assistantContent: any[] = [];
+        if (response.content) {
+          assistantContent.push({ type: 'text', text: response.content });
+        }
+        for (const toolUse of response.toolUses) {
+          assistantContent.push({
+            type: 'tool_use',
+            id: toolUse.id,
+            name: toolUse.name,
+            input: toolUse.input,
+          });
+        }
+
+        conversationHistory.push({
+          role: 'assistant',
+          content: assistantContent,
+        });
+
+        // Add user message with tool results
+        conversationHistory.push({
+          role: 'user',
+          content: toolResults,
+        });
+      }
 
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: response.content,
+        content: finalResponse,
         timestamp: Date.now(),
       };
 
       addChatMessage(assistantMessage);
 
       // Consume tokens if using free model
-      if (!userConfig.useOwnKey && response.tokensUsed) {
-        consumeTokens(response.tokensUsed);
+      if (!userConfig.useOwnKey && totalTokens > 0) {
+        consumeTokens(totalTokens);
       }
     } catch (error) {
       const errorMessage: ChatMessage = {

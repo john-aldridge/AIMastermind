@@ -117,7 +117,7 @@ Store    API Calls    Render Widgets
 **Content Script**:
 - Open page DevTools (F12)
 - Console logs appear in page console
-- Look for "AI Mastermind" prefix
+- Look for "Synergy AI" prefix
 
 **Background Script**:
 - Go to `chrome://extensions/`
