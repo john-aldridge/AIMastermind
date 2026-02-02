@@ -216,6 +216,53 @@ export class BrowserClient extends APIClientBase {
           },
         ],
       },
+      {
+        name: 'browser_list_service_workers',
+        description: 'List all registered service workers on the current page. Shows scope, state, script URL, and controlling status.',
+        parameters: [],
+      },
+      {
+        name: 'browser_unregister_service_worker',
+        description: 'Unregister a service worker by its scope URL. Removes the service worker from the page.',
+        parameters: [
+          {
+            name: 'scope',
+            type: 'string',
+            description: 'The scope URL of the service worker to unregister (get from browser_list_service_workers)',
+            required: true,
+          },
+        ],
+      },
+      {
+        name: 'browser_block_service_workers',
+        description: 'Prevent any new service workers from being registered on this page. Existing service workers continue running.',
+        parameters: [],
+      },
+      {
+        name: 'browser_monitor_reloads',
+        description: 'Monitor and log all page reload attempts with stack traces. Shows what code is trying to reload the page.',
+        parameters: [
+          {
+            name: 'block_reloads',
+            type: 'boolean',
+            description: 'Set to true to block reload attempts instead of just logging them',
+            required: false,
+            default: false,
+          },
+        ],
+      },
+      {
+        name: 'browser_get_service_worker_script',
+        description: 'Fetch and read the source code of a service worker script.',
+        parameters: [
+          {
+            name: 'script_url',
+            type: 'string',
+            description: 'The script URL of the service worker (get from browser_list_service_workers)',
+            required: true,
+          },
+        ],
+      },
     ];
   }
 
@@ -280,6 +327,21 @@ export class BrowserClient extends APIClientBase {
           break;
         case 'browser_inspect_page':
           result = await this.inspectPage(parameters);
+          break;
+        case 'browser_list_service_workers':
+          result = await this.listServiceWorkers(parameters);
+          break;
+        case 'browser_unregister_service_worker':
+          result = await this.unregisterServiceWorker(parameters);
+          break;
+        case 'browser_block_service_workers':
+          result = await this.blockServiceWorkers(parameters);
+          break;
+        case 'browser_monitor_reloads':
+          result = await this.monitorReloads(parameters);
+          break;
+        case 'browser_get_service_worker_script':
+          result = await this.getServiceWorkerScript(parameters);
           break;
         default:
           throw new Error(`Unknown capability: ${capabilityName}`);
@@ -1086,6 +1148,293 @@ export class BrowserClient extends APIClientBase {
     const result = results[0]?.result;
     if (!result) {
       throw new Error('Failed to inspect page');
+    }
+
+    return result;
+  }
+
+  /**
+   * List all registered service workers
+   */
+  private async listServiceWorkers(_params: any): Promise<any> {
+    console.log('[BrowserClient] Listing service workers');
+
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error('No active tab found');
+    }
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: async () => {
+        if (!('serviceWorker' in navigator)) {
+          return {
+            supported: false,
+            message: 'Service Workers not supported in this browser',
+            workers: [],
+          };
+        }
+
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        const workers = registrations.map(reg => ({
+          scope: reg.scope,
+          state: reg.active?.state || 'unknown',
+          scriptURL: reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || 'unknown',
+          updateViaCache: reg.updateViaCache,
+          controlling: navigator.serviceWorker.controller?.scriptURL === reg.active?.scriptURL,
+        }));
+
+        return {
+          supported: true,
+          count: workers.length,
+          workers,
+          message: workers.length > 0
+            ? `Found ${workers.length} registered service worker(s)`
+            : 'No service workers registered on this page',
+        };
+      },
+      args: [],
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      throw new Error('Failed to list service workers');
+    }
+
+    return result;
+  }
+
+  /**
+   * Unregister a service worker by scope
+   */
+  private async unregisterServiceWorker(params: any): Promise<any> {
+    const { scope } = params;
+    console.log('[BrowserClient] Unregistering service worker:', scope);
+
+    if (!scope) {
+      throw new Error('scope parameter is required');
+    }
+
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error('No active tab found');
+    }
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: async (targetScope: string) => {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        const registration = registrations.find(reg => reg.scope === targetScope);
+
+        if (!registration) {
+          return {
+            success: false,
+            error: `No service worker found with scope: ${targetScope}`,
+          };
+        }
+
+        const unregistered = await registration.unregister();
+
+        return {
+          success: unregistered,
+          scope: targetScope,
+          message: unregistered
+            ? `Successfully unregistered service worker at ${targetScope}`
+            : `Failed to unregister service worker at ${targetScope}`,
+        };
+      },
+      args: [scope],
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      throw new Error('Failed to unregister service worker');
+    }
+
+    if (!result.success) {
+      throw new Error(result.error || 'Unregistration failed');
+    }
+
+    return result;
+  }
+
+  /**
+   * Block service worker registration
+   */
+  private async blockServiceWorkers(_params: any): Promise<any> {
+    console.log('[BrowserClient] Blocking service worker registration');
+
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error('No active tab found');
+    }
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: () => {
+        if (!('serviceWorker' in navigator)) {
+          return {
+            success: false,
+            message: 'Service Workers not supported',
+          };
+        }
+
+        // Override register function to block new registrations
+        (navigator.serviceWorker as any).register = function(...args: any[]) {
+          console.warn('[Extension] Blocked service worker registration:', args[0]);
+          return Promise.reject(new Error('Service worker registration blocked by extension'));
+        };
+
+        // Mark that blocking is active
+        (window as any).__swBlockingActive = true;
+
+        return {
+          success: true,
+          message: 'Service worker registration is now blocked. New registrations will be prevented.',
+        };
+      },
+      args: [],
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      throw new Error('Failed to block service workers');
+    }
+
+    return result;
+  }
+
+  /**
+   * Monitor page reload attempts
+   */
+  private async monitorReloads(params: any): Promise<any> {
+    const { block_reloads = false } = params;
+    console.log('[BrowserClient] Monitoring page reloads, block:', block_reloads);
+
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error('No active tab found');
+    }
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: (shouldBlock: boolean) => {
+        // Intercept location.reload
+        const originalReload = window.location.reload;
+        (window.location as any).reload = function() {
+          const stack = new Error().stack;
+          console.warn('[Extension] Page reload detected!');
+          console.warn('Stack trace:', stack);
+
+          if (shouldBlock) {
+            console.warn('[Extension] Reload blocked');
+            return;
+          }
+
+          return originalReload.call(this);
+        };
+
+        // Intercept window.location = ... assignments
+        const originalLocationSetter = Object.getOwnPropertyDescriptor(window, 'location')?.set;
+        if (originalLocationSetter) {
+          Object.defineProperty(window, 'location', {
+            set: function(value) {
+              const stack = new Error().stack;
+              console.warn('[Extension] Location change detected:', value);
+              console.warn('Stack trace:', stack);
+
+              if (shouldBlock && value === window.location.href) {
+                console.warn('[Extension] Reload via location assignment blocked');
+                return;
+              }
+
+              return originalLocationSetter.call(this, value);
+            },
+            get: function() {
+              return window.location;
+            },
+          });
+        }
+
+        return {
+          success: true,
+          monitoring: true,
+          blocking: shouldBlock,
+          message: shouldBlock
+            ? 'Reload monitoring active - reloads will be blocked and logged'
+            : 'Reload monitoring active - reloads will be logged to console',
+        };
+      },
+      args: [block_reloads],
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      throw new Error('Failed to setup reload monitoring');
+    }
+
+    return result;
+  }
+
+  /**
+   * Get service worker script content
+   */
+  private async getServiceWorkerScript(params: any): Promise<any> {
+    const { script_url } = params;
+    console.log('[BrowserClient] Fetching service worker script:', script_url);
+
+    if (!script_url) {
+      throw new Error('script_url parameter is required');
+    }
+
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error('No active tab found');
+    }
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: async (url: string) => {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            return {
+              success: false,
+              error: `Failed to fetch: ${response.status} ${response.statusText}`,
+            };
+          }
+
+          const content = await response.text();
+
+          return {
+            success: true,
+            url: url,
+            content: content,
+            size: content.length,
+            message: `Fetched service worker script (${content.length} bytes)`,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+      args: [script_url],
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      throw new Error('Failed to fetch service worker script');
+    }
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to fetch script');
     }
 
     return result;

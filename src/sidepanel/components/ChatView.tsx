@@ -501,16 +501,29 @@ export const ChatView: React.FC = () => {
 
         if (hasBrowserTools) {
           prompt += '\n\nIMPORTANT: You have browser manipulation tools that let you directly modify the current web page. When asked to change, translate, remove, or modify anything on the page, you MUST use these tools to actually perform the action, not just explain it.';
+
+          prompt += '\n\n=== PARALLEL EXECUTION STRATEGY ===';
+          prompt += '\nFor EVERY request, analyze and optimize execution:';
+          prompt += '\n1. Parse the request into discrete operations';
+          prompt += '\n2. Classify each operation as INDEPENDENT or DEPENDENT:';
+          prompt += '\n   - INDEPENDENT: Can execute without needing results from other operations';
+          prompt += '\n   - DEPENDENT: Requires output from a previous operation';
+          prompt += '\n3. Group all independent operations and call their tools SIMULTANEOUSLY in one response';
+          prompt += '\n4. Only use multiple iterations for dependent operations that truly need sequential execution';
+          prompt += '\n\nExamples of INDEPENDENT operations (execute in parallel):';
+          prompt += '\n- Removing different elements (modal, overlay, popup)';
+          prompt += '\n- Modifying different properties (blur, scroll, styles)';
+          prompt += '\n- Translation using browser_translate_page_native (single call)';
+          prompt += '\n- Any operations that modify different parts of the page';
+          prompt += '\n\nExamples of DEPENDENT operations (must be sequential):';
+          prompt += '\n- Getting text THEN translating it (AI translation workflow)';
+          prompt += '\n- Inspecting page THEN removing found elements (if you need to discover selectors first)';
+          prompt += '\n\nDefault: Assume operations are INDEPENDENT unless they explicitly require previous results. Always prefer parallel execution for speed.';
+
           prompt += '\n\nCRITICAL - When removing elements: ALWAYS check the "removed" count in the tool result.';
-          prompt += '\n\nIf removed: 0 (element not found):';
-          prompt += '\n1. Use browser_inspect_page to find actual selectors';
-          prompt += '\n2. Try the selectors from selectorOptions array';
-          prompt += '\n\nIf removed: 1 but element reappears (JavaScript recreating it):';
-          prompt += '\n1. Use browser_modify_style to force-hide with CSS: {selector: ".element", styles: {"display": "none", "visibility": "hidden", "opacity": "0", "pointer-events": "none"}}';
-          prompt += '\n2. Also hide parent elements if needed';
-          prompt += '\n3. This prevents JavaScript from recreating visible elements';
-          prompt += '\n\nFor stubborn modals: Use browser_execute_javascript to inject persistent CSS:';
-          prompt += '\nconst style = document.createElement("style"); style.textContent = ".selector { display: none !important; }"; document.head.appendChild(style);';
+          prompt += '\nIf removed: 0 - Use browser_inspect_page to find actual selectors';
+          prompt += '\nIf removed: 1 but element reappears - Use browser_modify_style to force-hide with CSS (display: none, visibility: hidden, opacity: 0)';
+          prompt += '\nFor stubborn elements - Use browser_execute_javascript to inject: const style = document.createElement("style"); style.textContent = ".selector { display: none !important; }"; document.head.appendChild(style);';
         }
 
         if (hasTranslationTools) {
