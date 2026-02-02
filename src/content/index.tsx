@@ -74,39 +74,70 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === MessageType.EXTRACT_JAVASCRIPT) {
-    console.log('[Content] Extracting JavaScript from page...');
+  try {
+    if (message.type === MessageType.EXTRACT_JAVASCRIPT) {
+      console.log('[Content] Extracting JavaScript from page...');
 
-    // Extract JavaScript asynchronously
-    javascriptExtractor.extractAllJavaScript()
-      .then(scripts => {
-        const summary = javascriptExtractor.formatSummary(scripts);
-        sendResponse({ success: true, data: summary });
-      })
-      .catch(error => {
-        console.error('[Content] Error extracting JavaScript:', error);
-        sendResponse({ success: false, error: String(error) });
-      });
+      // Extract JavaScript asynchronously
+      javascriptExtractor.extractAllJavaScript()
+        .then(scripts => {
+          if (!chrome.runtime?.id) return; // Check again before responding
+          const summary = javascriptExtractor.formatSummary(scripts);
+          sendResponse({ success: true, data: summary });
+        })
+        .catch(error => {
+          if (!chrome.runtime?.id) return; // Context invalidated, ignore
+          console.error('[Content] Error extracting JavaScript:', error);
+          sendResponse({ success: false, error: String(error) });
+        });
 
-    // Return true to indicate async response
-    return true;
+      // Return true to indicate async response
+      return true;
+    }
+
+    if (message.type === MessageType.EXTRACT_CSS) {
+      console.log('[Content] Extracting CSS from page...');
+
+      // Extract CSS asynchronously
+      cssExtractor.extractAllCSS()
+        .then(styles => {
+          if (!chrome.runtime?.id) return; // Check again before responding
+          const summary = cssExtractor.formatSummary(styles);
+          sendResponse({ success: true, data: summary });
+        })
+        .catch(error => {
+          if (!chrome.runtime?.id) return; // Context invalidated, ignore
+          console.error('[Content] Error extracting CSS:', error);
+          sendResponse({ success: false, error: String(error) });
+        });
+
+      // Return true to indicate async response
+      return true;
+    }
+  } catch (error) {
+    // Suppress context invalidation errors
+    if (error instanceof Error && error.message.includes('Extension context invalidated')) {
+      return false;
+    }
+    console.error('[Content] Unexpected error in message handler:', error);
+    return false;
   }
 
-  if (message.type === MessageType.EXTRACT_CSS) {
-    console.log('[Content] Extracting CSS from page...');
+  return false;
+});
 
-    // Extract CSS asynchronously
-    cssExtractor.extractAllCSS()
-      .then(styles => {
-        const summary = cssExtractor.formatSummary(styles);
-        sendResponse({ success: true, data: summary });
-      })
-      .catch(error => {
-        console.error('[Content] Error extracting CSS:', error);
-        sendResponse({ success: false, error: String(error) });
-      });
+// Global error handler to suppress extension context errors
+window.addEventListener('error', (event) => {
+  if (event.error?.message?.includes('Extension context invalidated')) {
+    event.preventDefault(); // Suppress the error from console
+    return true;
+  }
+});
 
-    // Return true to indicate async response
+// Global unhandled rejection handler
+window.addEventListener('unhandledrejection', (event) => {
+  if (event.reason?.message?.includes('Extension context invalidated')) {
+    event.preventDefault(); // Suppress the error from console
     return true;
   }
 });

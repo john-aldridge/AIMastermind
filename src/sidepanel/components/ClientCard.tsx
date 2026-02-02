@@ -21,14 +21,26 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
 
   useEffect(() => {
     if (clientMetadata) {
+      // Get client instance first
+      const instance = ClientRegistry.getInstance(clientMetadata.id);
+      setClientInstance(instance);
+
       // Check chrome storage for saved credentials
       chrome.storage.local.get(`client:${clientMetadata.id}`).then((data) => {
         const stored = data[`client:${clientMetadata.id}`];
-        setIsConfigured(!!stored?.credentials && Object.keys(stored.credentials).length > 0);
 
-        // Get client instance
-        const instance = ClientRegistry.getInstance(clientMetadata.id);
-        setClientInstance(instance);
+        // Check if configured:
+        // - If client requires no credentials (empty array), it's always configured if stored
+        // - If client requires credentials, check if they're provided
+        const credentialFields = instance?.getCredentialFields() || [];
+        const requiresCredentials = credentialFields.length > 0;
+
+        if (requiresCredentials) {
+          setIsConfigured(!!stored?.credentials && Object.keys(stored.credentials).length > 0);
+        } else {
+          // No credentials needed - configured if it exists in storage
+          setIsConfigured(!!stored);
+        }
 
         // Load credentials if available
         if (stored?.credentials && instance) {
@@ -67,7 +79,11 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
           <div className="flex-1">
             <div className="flex items-center gap-2">
               {displayIcon && (
-                <img src={displayIcon} alt={displayName} className="w-5 h-5" />
+                displayIcon.startsWith('http') || displayIcon.startsWith('/') ? (
+                  <img src={displayIcon} alt={displayName} className="w-5 h-5" />
+                ) : (
+                  <span className="text-xl leading-none">{displayIcon}</span>
+                )
               )}
               <h3 className="font-semibold text-gray-800">{displayName}</h3>
               {isBuiltIn && (

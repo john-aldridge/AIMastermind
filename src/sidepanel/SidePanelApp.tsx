@@ -1,31 +1,51 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '@/state/appStore';
 import { ChatView } from './components/ChatView';
-import { PlansView } from './components/PlansView';
+import { PluginsView } from './components/PluginsView';
 import { ClientsView } from './components/ClientsView';
 import { SettingsView } from './components/SettingsView';
-import { CreatePlanModal } from './components/CreatePlanModal';
 import { sendToBackground } from '@/utils/messaging';
 import { MessageType } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
 import { networkMonitor } from '@/utils/networkMonitor';
 import { registerAllClients } from '@/clients';
+import { registerAllPlugins } from '@/plugins';
 
 type View = 'chat' | 'plugins' | 'clients' | 'settings';
 
 export const SidePanelApp: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const { plans, userConfig, updateUserConfig, chatMessages } = useAppStore();
 
   useEffect(() => {
-    // Register all built-in clients
+    // Register all built-in clients and plugins
     registerAllClients();
+    registerAllPlugins();
+
+    // Auto-configure BrowserClient (no credentials needed)
+    autoConfigureBrowserClient();
 
     // Load state from storage on mount
     loadState();
   }, []);
+
+  const autoConfigureBrowserClient = async () => {
+    // Check if browser client is already configured
+    const data = await chrome.storage.local.get('client:browser');
+    if (!data['client:browser']) {
+      // Auto-configure it since it needs no credentials
+      await chrome.storage.local.set({
+        'client:browser': {
+          clientId: 'browser',
+          credentials: {},
+          isActive: true,
+          configuredAt: Date.now(),
+        },
+      });
+      console.log('[SidePanelApp] Auto-configured BrowserClient');
+    }
+  };
 
   const loadState = async () => {
     const response = await sendToBackground({ type: MessageType.LOAD_STATE });
@@ -144,7 +164,7 @@ export const SidePanelApp: React.FC = () => {
         {currentView === 'chat' && <ChatView />}
         {currentView === 'plugins' && (
           <div className="overflow-auto flex-1">
-            <PlansView onCreatePlan={() => setShowCreateModal(true)} />
+            <PluginsView />
           </div>
         )}
         {currentView === 'clients' && (
@@ -158,11 +178,6 @@ export const SidePanelApp: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* Create Plan Modal */}
-      {showCreateModal && (
-        <CreatePlanModal onClose={() => setShowCreateModal(false)} />
-      )}
     </div>
   );
 };

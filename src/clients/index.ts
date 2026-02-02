@@ -8,6 +8,8 @@
 import { ClientRegistry } from './ClientRegistry';
 import { JiraClient } from './JiraClient';
 import { ConfluenceClient } from './ConfluenceClient';
+import { PinterestClient } from './PinterestClient';
+import { BrowserClient } from './BrowserClient';
 
 /**
  * Register all clients
@@ -19,6 +21,8 @@ export function registerAllClients(): void {
   // Register built-in clients
   ClientRegistry.register(JiraClient);
   ClientRegistry.register(ConfluenceClient);
+  ClientRegistry.register(PinterestClient);
+  ClientRegistry.register(BrowserClient);
 
   // Add more clients here as they're created:
   // ClientRegistry.register(GitHubClient);

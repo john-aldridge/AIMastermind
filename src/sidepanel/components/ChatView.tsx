@@ -4,6 +4,7 @@ import { apiService, ToolDefinition } from '@/utils/api';
 import { MessageType } from '@/utils/messaging';
 import { FileAnalysis } from './FileAnalysis';
 import { ClientRegistry } from '@/clients';
+import { PluginRegistry } from '@/plugins';
 
 interface TabContext {
   tabId: number;
@@ -41,7 +42,14 @@ export const ChatView: React.FC = () => {
   // Capture context from all tabs and load tools
   useEffect(() => {
     captureAllTabs();
-    loadAvailableTools();
+
+    // Delay loading tools to ensure clients are registered first
+    // (registerAllClients runs in SidePanelApp's useEffect which may not be complete yet)
+    const timer = setTimeout(() => {
+      loadAvailableTools();
+    }, 100);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Re-capture tabs when window regains focus
@@ -111,10 +119,10 @@ export const ChatView: React.FC = () => {
 
   const loadAvailableTools = async () => {
     try {
-      console.log('[ChatView] Loading available tools from configured clients...');
+      console.log('[ChatView] Loading available tools from configured clients and plugins...');
       const tools: ToolDefinition[] = [];
 
-      // Get all registered client IDs
+      // Load tools from clients
       const clientIds = ClientRegistry.getAllIds();
       console.log('[ChatView] Found registered clients:', clientIds);
 
@@ -124,25 +132,114 @@ export const ChatView: React.FC = () => {
         const data = await chrome.storage.local.get(storageKey);
         const clientConfig = data[storageKey];
 
-        if (!clientConfig?.credentials || !clientConfig.isActive) {
-          console.log(`[ChatView] Client ${clientId} not configured or not active, skipping`);
-          continue;
-        }
-
-        console.log(`[ChatView] Loading tools from ${clientId}...`);
-
-        // Get client instance and load credentials
+        // Get client instance first to check if it requires credentials
         const clientInstance = ClientRegistry.getInstance(clientId);
         if (!clientInstance) {
           console.warn(`[ChatView] Could not get instance for ${clientId}`);
           continue;
         }
 
-        clientInstance.setCredentials(clientConfig.credentials);
+        // Check if client is configured based on whether it requires credentials
+        const credentialFields = clientInstance.getCredentialFields();
+        const requiresCredentials = credentialFields.length > 0;
+
+        let isConfigured = false;
+        if (requiresCredentials) {
+          // For clients that require credentials, check they're provided
+          isConfigured = !!clientConfig?.credentials && Object.keys(clientConfig.credentials).length > 0;
+        } else {
+          // For clients with no credentials, just check if storage entry exists
+          isConfigured = !!clientConfig;
+        }
+
+        if (!isConfigured || !clientConfig?.isActive) {
+          console.log(`[ChatView] Client ${clientId} not configured or not active, skipping`);
+          continue;
+        }
+
+        console.log(`[ChatView] Loading tools from client ${clientId}...`);
+
+        // Load credentials
+        clientInstance.setCredentials(clientConfig.credentials || {});
 
         // Get capabilities and convert to tool definitions
         const capabilities = clientInstance.getCapabilities();
         console.log(`[ChatView] Client ${clientId} has ${capabilities.length} capabilities`);
+
+        for (const capability of capabilities) {
+          const properties: Record<string, any> = {};
+          const required: string[] = [];
+
+          for (const param of capability.parameters) {
+            properties[param.name] = {
+              type: param.type,
+              description: param.description,
+              ...(param.default !== undefined && { default: param.default }),
+            };
+
+            if (param.required) {
+              required.push(param.name);
+            }
+          }
+
+          tools.push({
+            name: capability.name,
+            description: capability.description,
+            input_schema: {
+              type: 'object',
+              properties,
+              required,
+            },
+          });
+        }
+      }
+
+      // Load tools from plugins
+      const pluginIds = PluginRegistry.getAllIds();
+      console.log('[ChatView] Found registered plugins:', pluginIds);
+
+      for (const pluginId of pluginIds) {
+        // Check if plugin is configured
+        const storageKey = `plugin:${pluginId}`;
+        const data = await chrome.storage.local.get(storageKey);
+        const pluginConfig = data[storageKey];
+
+        if (!pluginConfig?.config || !pluginConfig.isActive) {
+          console.log(`[ChatView] Plugin ${pluginId} not configured or not active, skipping`);
+          continue;
+        }
+
+        console.log(`[ChatView] Loading tools from plugin ${pluginId}...`);
+
+        // Get plugin instance and load config
+        const pluginInstance = PluginRegistry.getInstance(pluginId);
+        if (!pluginInstance) {
+          console.warn(`[ChatView] Could not get instance for ${pluginId}`);
+          continue;
+        }
+
+        pluginInstance.setConfig(pluginConfig.config);
+
+        // Resolve dependencies
+        const dependencies = pluginInstance.getDependencies();
+        for (const dep of dependencies) {
+          const clientInstance = ClientRegistry.getInstance(dep);
+          if (clientInstance) {
+            const clientStorageKey = `client:${dep}`;
+            const clientData = await chrome.storage.local.get(clientStorageKey);
+            const clientConfig = clientData[clientStorageKey];
+
+            if (clientConfig?.credentials) {
+              clientInstance.setCredentials(clientConfig.credentials);
+              await clientInstance.initialize();
+              pluginInstance.setDependency(dep, clientInstance);
+            }
+          }
+        }
+
+        // Get capabilities and convert to tool definitions
+        const capabilities = pluginInstance.getCapabilities();
+        console.log(`[ChatView] Plugin ${pluginId} has ${capabilities.length} capabilities`);
 
         for (const capability of capabilities) {
           const properties: Record<string, any> = {};
@@ -199,7 +296,7 @@ export const ChatView: React.FC = () => {
   const executeToolCall = async (toolName: string, toolInput: Record<string, any>): Promise<any> => {
     console.log(`[ChatView] Executing tool: ${toolName}`, toolInput);
 
-    // Find which client owns this tool
+    // Check clients first
     const clientIds = ClientRegistry.getAllIds();
     for (const clientId of clientIds) {
       const clientInstance = ClientRegistry.getInstance(clientId);
@@ -216,8 +313,9 @@ export const ChatView: React.FC = () => {
         const data = await chrome.storage.local.get(storageKey);
         const clientConfig = data[storageKey];
 
-        if (clientConfig?.credentials) {
-          clientInstance.setCredentials(clientConfig.credentials);
+        // Set credentials and initialize (even if credentials are empty)
+        if (clientConfig) {
+          clientInstance.setCredentials(clientConfig.credentials || {});
           await clientInstance.initialize();
         }
 
@@ -228,7 +326,52 @@ export const ChatView: React.FC = () => {
       }
     }
 
-    throw new Error(`Tool ${toolName} not found in any configured client`);
+    // Check plugins
+    const pluginIds = PluginRegistry.getAllIds();
+    for (const pluginId of pluginIds) {
+      const pluginInstance = PluginRegistry.getInstance(pluginId);
+      if (!pluginInstance) continue;
+
+      const capabilities = pluginInstance.getCapabilities();
+      const capability = capabilities.find(c => c.name === toolName);
+
+      if (capability) {
+        console.log(`[ChatView] Tool ${toolName} belongs to plugin ${pluginId}`);
+
+        // Load config from storage
+        const storageKey = `plugin:${pluginId}`;
+        const data = await chrome.storage.local.get(storageKey);
+        const pluginConfig = data[storageKey];
+
+        if (pluginConfig?.config) {
+          pluginInstance.setConfig(pluginConfig.config);
+
+          // Resolve dependencies
+          const dependencies = pluginInstance.getDependencies();
+          for (const dep of dependencies) {
+            const clientInstance = ClientRegistry.getInstance(dep);
+            if (clientInstance) {
+              const clientStorageKey = `client:${dep}`;
+              const clientData = await chrome.storage.local.get(clientStorageKey);
+              const clientConfig = clientData[clientStorageKey];
+
+              if (clientConfig?.credentials) {
+                clientInstance.setCredentials(clientConfig.credentials);
+                await clientInstance.initialize();
+                pluginInstance.setDependency(dep, clientInstance);
+              }
+            }
+          }
+        }
+
+        // Execute the capability
+        const result = await pluginInstance.executeCapability(toolName, toolInput);
+        console.log(`[ChatView] Tool ${toolName} result:`, result);
+        return result;
+      }
+    }
+
+    throw new Error(`Tool ${toolName} not found in any configured client or plugin`);
   };
 
   const handleSend = async () => {
@@ -244,6 +387,12 @@ export const ChatView: React.FC = () => {
     addChatMessage(userMessage);
     setInput('');
     setLoading(true);
+
+    // Log user request clearly
+    console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #2196F3');
+    console.log('%c👤 USER REQUEST:', 'color: #2196F3; font-weight: bold; font-size: 14px');
+    console.log(input.trim());
+    console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #2196F3');
 
     try {
       // Construct prompt with context from selected tabs
@@ -337,8 +486,47 @@ export const ChatView: React.FC = () => {
 
       let finalResponse = '';
       let totalTokens = 0;
-      const maxIterations = 5; // Prevent infinite loops
+      const maxIterations = 20; // Allow more iterations for complex tasks like translation
       let iteration = 0;
+
+      // Build dynamic system prompt based on available tools
+      const buildSystemPrompt = (): string | undefined => {
+        if (availableTools.length === 0) return undefined;
+
+        const toolNames = availableTools.map(t => t.name);
+        const hasBrowserTools = toolNames.some(name => name.startsWith('browser_'));
+        const hasTranslationTools = toolNames.some(name => name.includes('translate') || name.includes('text'));
+
+        let prompt = 'You are a helpful AI assistant with access to various tools and capabilities. You MUST use the available tools to perform actions - do not just describe what would happen.';
+
+        if (hasBrowserTools) {
+          prompt += '\n\nIMPORTANT: You have browser manipulation tools that let you directly modify the current web page. When asked to change, translate, remove, or modify anything on the page, you MUST use these tools to actually perform the action, not just explain it.';
+          prompt += '\n\nCRITICAL - When removing elements: ALWAYS check the "removed" count in the tool result.';
+          prompt += '\n\nIf removed: 0 (element not found):';
+          prompt += '\n1. Use browser_inspect_page to find actual selectors';
+          prompt += '\n2. Try the selectors from selectorOptions array';
+          prompt += '\n\nIf removed: 1 but element reappears (JavaScript recreating it):';
+          prompt += '\n1. Use browser_modify_style to force-hide with CSS: {selector: ".element", styles: {"display": "none", "visibility": "hidden", "opacity": "0", "pointer-events": "none"}}';
+          prompt += '\n2. Also hide parent elements if needed';
+          prompt += '\n3. This prevents JavaScript from recreating visible elements';
+          prompt += '\n\nFor stubborn modals: Use browser_execute_javascript to inject persistent CSS:';
+          prompt += '\nconst style = document.createElement("style"); style.textContent = ".selector { display: none !important; }"; document.head.appendChild(style);';
+        }
+
+        if (hasTranslationTools) {
+          prompt += '\n\n=== TRANSLATION OPTIONS ===\n\nYou have TWO ways to translate pages:\n\n**Option 1: Native Chrome Translation (DEFAULT - FAST)**\nUse browser_translate_page_native for instant translation:\n- Takes 1 iteration (very fast)\n- Uses Chrome\'s built-in AI translation\n- Best for basic translation needs\n- Example: browser_translate_page_native(target_language: "en")\n\n**Option 2: AI Translation (SLOWER - use only if requested)**\nUse this ONLY when the user explicitly asks for "AI translation" or wants context-aware translation:\n1. Call browser_get_page_text ONCE to extract ALL text nodes\n2. Translate ALL text nodes at once in a single response\n3. Call browser_replace_text ONCE with all translations\nThis takes 3 iterations.\n\n**DEFAULT BEHAVIOR: Always use browser_translate_page_native unless the user specifically asks for AI translation.**';
+        }
+
+        prompt += '\n\nAvailable tools:\n';
+        for (const tool of availableTools) {
+          prompt += `- ${tool.name}: ${tool.description}\n`;
+        }
+
+        prompt += '\n\nContext: The user is viewing browser tabs. The tab content is provided above. When the user refers to "this page", "the current page", or "the connected tab", they mean the content shown in the context. You should use browser tools to manipulate it directly.';
+        prompt += '\n\nAlways use tools to perform actions when available. Explain what you\'re doing, execute the tools, and report the results.';
+
+        return prompt;
+      };
 
       // Agentic loop: keep calling LLM until it stops using tools
       while (iteration < maxIterations) {
@@ -351,9 +539,7 @@ export const ChatView: React.FC = () => {
             prompt: '', // Not used when conversationHistory is provided
             conversationHistory,
             tools: availableTools.length > 0 ? availableTools : undefined,
-            systemPrompt: availableTools.length > 0
-              ? 'You are a helpful AI assistant with access to Jira and Confluence APIs. When the user asks about issues, projects, pages, or documentation, use the available tools to fetch real data. Always explain what you\'re doing and present the results clearly.'
-              : undefined,
+            systemPrompt: buildSystemPrompt(),
           },
           userConfig.useOwnKey
         );
@@ -373,7 +559,22 @@ export const ChatView: React.FC = () => {
 
         for (const toolUse of response.toolUses) {
           try {
+            // Add status message to show what tool is running
+            const statusMessage: ChatMessage = {
+              id: `status-${Date.now()}`,
+              role: 'assistant',
+              content: `⚙️ Executing: ${toolUse.name}... (iteration ${iteration}/${maxIterations})`,
+              timestamp: Date.now(),
+            };
+            addChatMessage(statusMessage);
+
             const result = await executeToolCall(toolUse.name, toolUse.input);
+
+            // Remove status message
+            useAppStore.setState(state => ({
+              chatMessages: state.chatMessages.filter(m => m.id !== statusMessage.id)
+            }));
+
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
@@ -416,6 +617,11 @@ export const ChatView: React.FC = () => {
         });
       }
 
+      // Check if we hit max iterations
+      if (iteration >= maxIterations) {
+        finalResponse += '\n\n⚠️ Note: Reached maximum iteration limit. The task may be incomplete. If needed, you can ask me to continue or try the request again.';
+      }
+
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
@@ -424,6 +630,15 @@ export const ChatView: React.FC = () => {
       };
 
       addChatMessage(assistantMessage);
+
+      // Log AI response clearly
+      console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #4CAF50');
+      console.log('%c🤖 AI RESPONSE:', 'color: #4CAF50; font-weight: bold; font-size: 14px');
+      console.log(finalResponse);
+      console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #4CAF50');
+      console.log('%c✅ INTERACTION COMPLETE', 'color: #4CAF50; font-weight: bold; font-size: 12px');
+      console.log(`Total iterations: ${iteration}, Tokens used: ${totalTokens}`);
+      console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n', 'color: #4CAF50');
 
       // Consume tokens if using free model
       if (!userConfig.useOwnKey && totalTokens > 0) {
