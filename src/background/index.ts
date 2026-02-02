@@ -1,6 +1,7 @@
 import { Message, MessageType, MessageResponse } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
 import { chromeStorageService } from '@/storage/chromeStorage';
+import { networkMonitor } from '@/utils/networkMonitor';
 
 console.log('AI Mastermind background script loaded');
 
@@ -164,7 +165,7 @@ chrome.runtime.onMessage.addListener(
   (message: Message, sender, sendResponse: (response: MessageResponse) => void) => {
     console.log('📨 [Background] Received message:', message.type, 'from:', sender.tab?.id || sender.id || 'extension');
 
-    handleMessage(message)
+    handleMessage(message, sender)
       .then(sendResponse)
       .catch((error) => {
         console.error('Error handling message:', error);
@@ -177,7 +178,8 @@ chrome.runtime.onMessage.addListener(
 );
 
 async function handleMessage(
-  message: Message
+  message: Message,
+  sender?: chrome.runtime.MessageSender
 ): Promise<MessageResponse> {
   switch (message.type) {
     case MessageType.GENERATE_CONTENT:
@@ -200,6 +202,15 @@ async function handleMessage(
 
     case MessageType.GET_RECENT_DOWNLOADS:
       return handleGetRecentDownloads();
+
+    case MessageType.NETWORK_DATA_INTERCEPTED:
+      return handleNetworkDataIntercepted(message.payload, sender?.tab?.id);
+
+    case MessageType.GET_NETWORK_SUMMARY:
+      return handleGetNetworkSummary(message.payload);
+
+    case MessageType.GET_NETWORK_REQUESTS:
+      return handleGetNetworkRequests(message.payload);
 
     default:
       return { success: false, error: 'Unknown message type' };
@@ -292,6 +303,36 @@ async function handleAuthenticate(payload: any): Promise<MessageResponse> {
 async function handleGetRecentDownloads(): Promise<MessageResponse> {
   try {
     return { success: true, data: recentDownloads };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleNetworkDataIntercepted(payload: any, tabId?: number): Promise<MessageResponse> {
+  try {
+    // Pass intercepted data to network monitor with tab ID
+    networkMonitor.handleInterceptedRequest(payload, tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetNetworkSummary(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabIds } = payload || {};
+    const summary = networkMonitor.getRequestSummary(tabIds);
+    return { success: true, data: summary };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetNetworkRequests(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabIds } = payload || {};
+    const requests = networkMonitor.getRequests(tabIds);
+    return { success: true, data: requests };
   } catch (error) {
     return { success: false, error: String(error) };
   }

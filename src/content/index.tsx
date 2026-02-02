@@ -1,13 +1,113 @@
 import { createRoot } from 'react-dom/client';
 import { ContentApp } from './ContentApp';
 import '@/styles/globals.css';
+import { MessageType } from '@/utils/messaging';
+import { javascriptExtractor } from './javascriptExtractor';
+import { cssExtractor } from './cssExtractor';
+
+// Inject network interceptor into page context
+const injectInterceptor = () => {
+  try {
+    const script = document.createElement('script');
+    const interceptorUrl = chrome.runtime.getURL('content/interceptor.js');
+
+    console.log('%c[AI Mastermind] Attempting to inject interceptor from:', interceptorUrl, 'background: #607D8B; color: white; padding: 2px 5px; border-radius: 3px;');
+
+    script.src = interceptorUrl;
+    script.onload = () => {
+      console.log('%c[AI Mastermind] Network interceptor injected and loaded successfully', 'background: #4CAF50; color: white; padding: 2px 5px; border-radius: 3px;');
+      script.remove(); // Clean up
+    };
+    script.onerror = (error) => {
+      console.error('%c[AI Mastermind] Failed to load network interceptor - this may be due to Content Security Policy (CSP) restrictions', 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;', error);
+    };
+    (document.head || document.documentElement).appendChild(script);
+  } catch (error) {
+    console.error('%c[AI Mastermind] Error injecting interceptor script:', error, 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;');
+  }
+};
+
+// Listen for intercepted network data from page context
+window.addEventListener('message', (event) => {
+  // Only accept messages from same origin and our interceptor
+  if (event.source !== window || event.data.source !== 'ai-mastermind-interceptor') {
+    return;
+  }
+
+  if (event.data.type === 'NETWORK_INTERCEPTED') {
+    const data = event.data.data;
+
+    // Safe logging with type checking
+    try {
+      const requestType = typeof data.type === 'string' ? data.type.toUpperCase() : 'UNKNOWN';
+      const method = data.request?.method || 'UNKNOWN';
+      const url = data.request?.url || 'UNKNOWN';
+      console.log(`%c[AI Mastermind] Intercepted ${requestType} request: ${method} ${url}`, 'background: #2196F3; color: white; padding: 2px 5px; border-radius: 3px;');
+    } catch (err) {
+      console.error('[AI Mastermind] Error logging intercepted request:', err, data);
+    }
+
+    // Forward to background script
+    chrome.runtime.sendMessage({
+      type: MessageType.NETWORK_DATA_INTERCEPTED,
+      payload: data
+    }).catch(err => {
+      console.error('[Content] Error forwarding network data:', err);
+    });
+  }
+});
+
+// Listen for messages from background/popup
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === MessageType.EXTRACT_JAVASCRIPT) {
+    console.log('[Content] Extracting JavaScript from page...');
+
+    // Extract JavaScript asynchronously
+    javascriptExtractor.extractAllJavaScript()
+      .then(scripts => {
+        const summary = javascriptExtractor.formatSummary(scripts);
+        sendResponse({ success: true, data: summary });
+      })
+      .catch(error => {
+        console.error('[Content] Error extracting JavaScript:', error);
+        sendResponse({ success: false, error: String(error) });
+      });
+
+    // Return true to indicate async response
+    return true;
+  }
+
+  if (message.type === MessageType.EXTRACT_CSS) {
+    console.log('[Content] Extracting CSS from page...');
+
+    // Extract CSS asynchronously
+    cssExtractor.extractAllCSS()
+      .then(styles => {
+        const summary = cssExtractor.formatSummary(styles);
+        sendResponse({ success: true, data: summary });
+      })
+      .catch(error => {
+        console.error('[Content] Error extracting CSS:', error);
+        sendResponse({ success: false, error: String(error) });
+      });
+
+    // Return true to indicate async response
+    return true;
+  }
+});
 
 // Create a container for the extension content
 const initializeContentScript = () => {
   // Check if already initialized
   if (document.getElementById('ai-mastermind-root')) {
+    console.log('%c[AI Mastermind] Content script already initialized', 'background: #FF9800; color: white; padding: 2px 5px; border-radius: 3px;');
     return;
   }
+
+  console.log('%c[AI Mastermind] Content script initializing...', 'background: #9C27B0; color: white; padding: 2px 5px; border-radius: 3px;');
+
+  // Inject network interceptor first
+  injectInterceptor();
 
   // Create root container
   const rootContainer = document.createElement('div');
@@ -34,7 +134,9 @@ const initializeContentScript = () => {
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
+  console.log('%c[AI Mastermind] Waiting for DOM to load...', 'background: #673AB7; color: white; padding: 2px 5px; border-radius: 3px;');
   document.addEventListener('DOMContentLoaded', initializeContentScript);
 } else {
+  console.log('%c[AI Mastermind] DOM already loaded, initializing immediately', 'background: #673AB7; color: white; padding: 2px 5px; border-radius: 3px;');
   initializeContentScript();
 }

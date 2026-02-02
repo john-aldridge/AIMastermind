@@ -24,47 +24,58 @@ export interface NetworkRequest {
   timestamp: number;
   statusCode?: number;
   tabId?: number;
+  // Full request/response data from content script interception
+  requestHeaders?: Record<string, string>;
+  requestBody?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string;
+  duration?: number;
+  intercepted?: boolean; // true if captured via content script, false if via webRequest
 }
 
 export const MONITORING_LEVELS: Record<MonitoringLevel, MonitoringConfig> = {
   'filtering-only': {
     level: 'filtering-only',
-    description: 'Content Filtering (Built-in)',
+    description: 'Content Filtering Only',
     permissions: [],
     features: [
       'Block trackers & ads (declarativeNetRequest)',
-      'Filter content with rules',
-      'Native performance (no overhead)',
-      'No request observation'
+      'Filter content with predefined rules',
+      'Zero performance impact',
+      'No network request observation',
+      'No data sent to AI'
     ],
     performance: 'excellent',
-    note: 'Always available - uses declarativeNetRequest for efficient filtering'
+    note: 'Privacy-focused: Only blocks requests, never observes or captures data'
   },
   'api-monitoring': {
     level: 'api-monitoring',
-    description: 'API Monitoring + Filtering - Recommended',
+    description: 'API Monitoring - Recommended',
     permissions: ['webRequest'],
     features: [
-      'All filtering capabilities',
-      'Observe API calls (XHR/Fetch)',
-      'Include API data in chat context',
-      'Network timing analysis'
+      'Content filtering enabled',
+      'Capture full API request/response data (headers + bodies)',
+      'Intercept fetch() and XMLHttpRequest calls',
+      'Observe API endpoints only (not images, CSS, fonts)',
+      'Include decompressed response data in AI context'
     ],
     performance: 'good',
-    note: 'Best balance: filtering + API observation for AI analysis'
+    note: 'Best for analyzing API calls, responses, and data payloads. Minimal overhead.'
   },
   'full-monitoring': {
     level: 'full-monitoring',
-    description: 'Complete Monitoring + Filtering',
+    description: 'Complete Page Analysis',
     permissions: ['webRequest'],
     features: [
-      'All filtering capabilities',
-      'Observe all requests (images, CSS, scripts, etc.)',
-      'Complete headers & response data',
-      'Full network timeline'
+      'Everything from API Monitoring',
+      'Observe ALL network requests (images, CSS, fonts, scripts)',
+      'Extract and analyze all JavaScript code on page',
+      'Capture inline and external script contents',
+      'Full network timeline with all resource types'
     ],
     performance: 'moderate',
-    note: 'Maximum visibility - captures everything for comprehensive analysis'
+    note: 'Maximum visibility: captures all network traffic + extracts all JavaScript. Higher memory usage.',
+    userWarning: 'This mode extracts all JavaScript code from the page for AI analysis. This may use significant memory on complex pages.'
   }
 };
 
@@ -201,8 +212,11 @@ export class NetworkMonitor {
     return this.isMonitoring;
   }
 
-  getRequests(tabId?: number): NetworkRequest[] {
+  getRequests(tabId?: number | number[]): NetworkRequest[] {
     if (tabId !== undefined) {
+      if (Array.isArray(tabId)) {
+        return this.requests.filter(r => r.tabId !== undefined && tabId.includes(r.tabId));
+      }
       return this.requests.filter(r => r.tabId === tabId);
     }
     return [...this.requests];
@@ -212,40 +226,124 @@ export class NetworkMonitor {
     this.requests = [];
   }
 
-  getRequestSummary(tabId?: number): string {
+  // Handle intercepted network data from content script
+  handleInterceptedRequest(data: any, tabId?: number) {
+    const request: NetworkRequest = {
+      url: data.request.url,
+      method: data.request.method,
+      type: data.type, // 'fetch' or 'xhr'
+      timestamp: data.request.timestamp,
+      statusCode: data.response?.status,
+      requestHeaders: data.request.headers,
+      requestBody: data.request.body,
+      responseHeaders: data.response?.headers,
+      responseBody: data.response?.body,
+      duration: data.duration,
+      intercepted: true,
+      tabId: tabId
+    };
+
+    this.handleRequest(request);
+    console.log('[NetworkMonitor] Intercepted request from tab', tabId, ':', request.method, request.url,
+      '| Has response headers:', !!request.responseHeaders,
+      '| Has response body:', !!request.responseBody,
+      '| Status:', request.statusCode);
+  }
+
+  getRequestSummary(tabId?: number | number[]): string {
     const requests = this.getRequests(tabId);
+    console.log('[NetworkMonitor] getRequestSummary called with tabId:', tabId, '| Found', requests.length, 'requests');
+
     if (requests.length === 0) {
       return 'No network requests captured.';
     }
 
-    // Group by domain
-    const byDomain = requests.reduce((acc, req) => {
-      try {
-        const url = new URL(req.url);
-        const domain = url.hostname;
-        if (!acc[domain]) {
-          acc[domain] = [];
+    // Separate intercepted requests (with full data) from webRequest-only
+    const interceptedRequests = requests.filter(r => r.intercepted);
+    const basicRequests = requests.filter(r => !r.intercepted);
+
+    console.log('[NetworkMonitor] Intercepted requests:', interceptedRequests.length, '| Basic requests:', basicRequests.length);
+
+    let summary = `=== Network Activity (${requests.length} requests, ${interceptedRequests.length} with full data) ===\n\n`;
+
+    // Show intercepted requests with full details first
+    if (interceptedRequests.length > 0) {
+      summary += `== Requests with Full Request/Response Data ==\n\n`;
+
+      interceptedRequests.slice(0, 20).forEach(req => {
+        summary += `${req.method} ${req.url}\n`;
+        summary += `  Status: ${req.statusCode || 'unknown'}\n`;
+        if (req.duration) summary += `  Duration: ${req.duration}ms\n`;
+
+        // Include request headers
+        if (req.requestHeaders && Object.keys(req.requestHeaders).length > 0) {
+          summary += `  Request Headers:\n`;
+          Object.entries(req.requestHeaders).slice(0, 10).forEach(([key, value]) => {
+            summary += `    ${key}: ${value}\n`;
+          });
         }
-        acc[domain].push(req);
-      } catch (e) {
-        // Invalid URL
-      }
-      return acc;
-    }, {} as Record<string, NetworkRequest[]>);
 
-    let summary = `=== Network Activity (${requests.length} requests) ===\n\n`;
+        // Include request body (truncated)
+        if (req.requestBody) {
+          const bodyPreview = req.requestBody.length > 500
+            ? req.requestBody.substring(0, 500) + '...[truncated]'
+            : req.requestBody;
+          summary += `  Request Body: ${bodyPreview}\n`;
+        }
 
-    Object.entries(byDomain).forEach(([domain, reqs]) => {
-      summary += `${domain}: ${reqs.length} requests\n`;
-      // Show first 5 URLs per domain
-      reqs.slice(0, 5).forEach(req => {
-        summary += `  - ${req.method} ${req.url}\n`;
+        // Include response headers
+        if (req.responseHeaders && Object.keys(req.responseHeaders).length > 0) {
+          summary += `  Response Headers:\n`;
+          Object.entries(req.responseHeaders).slice(0, 10).forEach(([key, value]) => {
+            summary += `    ${key}: ${value}\n`;
+          });
+        }
+
+        // Include response body (truncated)
+        if (req.responseBody) {
+          const bodyPreview = req.responseBody.length > 2000
+            ? req.responseBody.substring(0, 2000) + '...[truncated]'
+            : req.responseBody;
+          summary += `  Response Body: ${bodyPreview}\n`;
+        }
+
+        summary += '\n';
       });
-      if (reqs.length > 5) {
-        summary += `  ... and ${reqs.length - 5} more\n`;
+
+      if (interceptedRequests.length > 20) {
+        summary += `... and ${interceptedRequests.length - 20} more intercepted requests\n\n`;
       }
-      summary += '\n';
-    });
+    }
+
+    // Show basic requests (webRequest only) in grouped format
+    if (basicRequests.length > 0) {
+      summary += `== Additional Requests (metadata only) ==\n\n`;
+
+      const byDomain = basicRequests.reduce((acc, req) => {
+        try {
+          const url = new URL(req.url);
+          const domain = url.hostname;
+          if (!acc[domain]) {
+            acc[domain] = [];
+          }
+          acc[domain].push(req);
+        } catch (e) {
+          // Invalid URL
+        }
+        return acc;
+      }, {} as Record<string, NetworkRequest[]>);
+
+      Object.entries(byDomain).forEach(([domain, reqs]) => {
+        summary += `${domain}: ${reqs.length} requests\n`;
+        reqs.slice(0, 5).forEach(req => {
+          summary += `  - ${req.method} ${req.url}\n`;
+        });
+        if (reqs.length > 5) {
+          summary += `  ... and ${reqs.length - 5} more\n`;
+        }
+        summary += '\n';
+      });
+    }
 
     return summary;
   }

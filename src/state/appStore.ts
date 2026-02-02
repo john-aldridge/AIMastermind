@@ -54,6 +54,8 @@ export interface UserConfig {
 
   // Network monitoring
   networkMonitoringLevel?: MonitoringLevel;
+  extractJavaScript?: boolean; // For full-monitoring mode
+  extractCSS?: boolean; // For full-monitoring mode
 
   // Token management
   tokenBalance: number;
@@ -128,6 +130,8 @@ export const useAppStore = create<AppState>((set) => ({
     ],
     activeConfigurationId: 'free-model',
     networkMonitoringLevel: 'filtering-only',
+    extractJavaScript: true, // Default enabled for full-monitoring
+    extractCSS: true, // Default enabled for full-monitoring
     tokenBalance: 1000, // Free starter tokens
     dailyTokenUsage: 0,
     lastResetDate: new Date().toISOString().split('T')[0],

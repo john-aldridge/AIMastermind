@@ -140,12 +140,6 @@ export const NetworkSettings: React.FC = () => {
         )}
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
-        <strong>💡 How it works:</strong> Content filtering (blocking trackers/ads) is always available
-        via declarativeNetRequest. For network monitoring (observing requests for AI analysis), select
-        "API Monitoring" or "Full Monitoring" - Chrome will ask for webRequest permission the first time.
-      </div>
-
       {/* Monitoring Level Selector */}
       <div className="space-y-2">
         {Object.entries(MONITORING_LEVELS).map(([key, config]) => {
@@ -199,12 +193,57 @@ export const NetworkSettings: React.FC = () => {
                       Requires: {config.permissions.join(', ')}
                     </div>
                   )}
-                  {config.userWarning && isSelected && (
-                    <div className="text-xs text-orange-600 mt-1.5 flex items-start gap-1">
-                      <svg className="w-3 h-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                      <span>{config.userWarning}</span>
+                  {key === 'full-monitoring' && isSelected && (
+                    <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                      <div className="text-xs font-medium text-gray-700 mb-2">Extraction Options:</div>
+
+                      {/* JavaScript Extraction */}
+                      <div>
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={userConfig.extractJavaScript ?? true}
+                            onChange={(e) => updateUserConfig({ extractJavaScript: e.target.checked })}
+                            className="mt-0.5 flex-shrink-0"
+                          />
+                          <div>
+                            <div className="text-xs text-gray-900 font-medium">Extract JavaScript code from page</div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              Automatically extract and analyze all inline and external JavaScript files
+                            </div>
+                          </div>
+                        </label>
+                        <div className="text-xs text-red-600 mt-1.5 ml-5 flex items-start gap-1">
+                          <svg className="w-3 h-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          <span>Warning: Extracts all JavaScript code from the page for AI analysis. May use significant memory on complex pages with large scripts.</span>
+                        </div>
+                      </div>
+
+                      {/* CSS Extraction */}
+                      <div>
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={userConfig.extractCSS ?? true}
+                            onChange={(e) => updateUserConfig({ extractCSS: e.target.checked })}
+                            className="mt-0.5 flex-shrink-0"
+                          />
+                          <div>
+                            <div className="text-xs text-gray-900 font-medium">Extract CSS stylesheets from page</div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              Automatically extract and analyze all inline and external CSS stylesheets
+                            </div>
+                          </div>
+                        </label>
+                        <div className="text-xs text-red-600 mt-1.5 ml-5 flex items-start gap-1">
+                          <svg className="w-3 h-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          <span>Warning: Extracts all CSS code from the page for AI analysis. May use significant memory on pages with large stylesheets.</span>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>

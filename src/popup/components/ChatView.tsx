@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore, ChatMessage } from '@/state/appStore';
 import { apiService } from '@/utils/api';
-import { networkMonitor } from '@/utils/networkMonitor';
+import { MessageType } from '@/utils/messaging';
 import { FileAnalysis } from './FileAnalysis';
 
 interface TabContext {
@@ -153,17 +153,69 @@ export const ChatView: React.FC = () => {
         contextPrompt += `Here is the context from the browser tabs the user is viewing:\n\n${pageContext}`;
 
         // Include network data if monitoring is active
-        if (networkMonitor.isActive()) {
-          const selectedTabs = tabs.filter(tab => tab.selected);
-          const tabIds = selectedTabs.map(tab => tab.tabId);
+        const selectedTabs = tabs.filter(tab => tab.selected);
+        const tabIds = selectedTabs.map(tab => tab.tabId);
 
-          // Get network requests for selected tabs
-          const allRequests = tabIds.flatMap(tabId => networkMonitor.getRequests(tabId));
+        // Request network summary from background script
+        try {
+          const networkResponse = await chrome.runtime.sendMessage({
+            type: MessageType.GET_NETWORK_SUMMARY,
+            payload: { tabIds }
+          });
 
-          if (allRequests.length > 0) {
-            contextPrompt += `\n\n${networkMonitor.getRequestSummary()}`;
+          if (networkResponse?.success && networkResponse.data) {
+            const summary = networkResponse.data;
+            // Only include if there's actual data (not just "No network requests captured")
+            if (!summary.includes('No network requests captured')) {
+              contextPrompt += `\n\n${summary}`;
+            }
           }
+        } catch (error) {
+          console.error('[ChatView] Error getting network summary:', error);
         }
+
+        // Extract JavaScript and CSS if full-monitoring is enabled
+        if (userConfig.networkMonitoringLevel === 'full-monitoring' && selectedTabs.length > 0) {
+            const activeTab = selectedTabs[0]; // Use first selected tab
+
+            // Extract JavaScript if enabled
+            if (userConfig.extractJavaScript ?? true) {
+              console.log('[ChatView] Full monitoring active, extracting JavaScript...');
+              try {
+                const response = await chrome.tabs.sendMessage(activeTab.tabId, {
+                  type: 'EXTRACT_JAVASCRIPT'
+                });
+
+                if (response?.success && response.data) {
+                  contextPrompt += `\n\n${response.data}`;
+                  console.log('[ChatView] JavaScript extraction completed');
+                } else {
+                  console.warn('[ChatView] JavaScript extraction failed:', response?.error);
+                }
+              } catch (error) {
+                console.error('[ChatView] Error requesting JavaScript extraction:', error);
+              }
+            }
+
+            // Extract CSS if enabled
+            if (userConfig.extractCSS ?? true) {
+              console.log('[ChatView] Full monitoring active, extracting CSS...');
+              try {
+                const response = await chrome.tabs.sendMessage(activeTab.tabId, {
+                  type: 'EXTRACT_CSS'
+                });
+
+                if (response?.success && response.data) {
+                  contextPrompt += `\n\n${response.data}`;
+                  console.log('[ChatView] CSS extraction completed');
+                } else {
+                  console.warn('[ChatView] CSS extraction failed:', response?.error);
+                }
+              } catch (error) {
+                console.error('[ChatView] Error requesting CSS extraction:', error);
+              }
+            }
+          }
 
         contextPrompt += `\n\nUser question: ${userMessage.content}`;
       } else {

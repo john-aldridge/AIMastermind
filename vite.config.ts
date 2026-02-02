@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite';
+import { defineConfig, build } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
-import { copyFileSync } from 'fs';
+import { copyFileSync, mkdirSync } from 'fs';
 
 export default defineConfig({
   plugins: [
@@ -13,6 +13,72 @@ export default defineConfig({
         console.log('✓ Copied manifest.json to dist/');
       },
     },
+    {
+      name: 'build-iife-scripts',
+      async closeBundle() {
+        console.log('Building content script and interceptor as IIFE...');
+
+        // Build content script as IIFE
+        await build({
+          configFile: false,
+          define: {
+            'process.env.NODE_ENV': JSON.stringify('production'),
+            'process.env': '{}',
+            'global': 'globalThis',
+          },
+          resolve: {
+            alias: {
+              '@': resolve(__dirname, './src'),
+            },
+          },
+          build: {
+            outDir: 'dist/content',
+            emptyOutDir: false,
+            minify: false,
+            lib: {
+              entry: resolve(__dirname, 'src/content/index.tsx'),
+              name: 'ContentScript',
+              formats: ['iife'],
+              fileName: () => 'index.js',
+            },
+            rollupOptions: {
+              external: [/\.css$/],
+              output: {
+                extend: true,
+                globals: {
+                  react: 'React',
+                  'react-dom': 'ReactDOM',
+                  'react-dom/client': 'ReactDOM',
+                },
+              },
+            },
+          },
+        });
+
+        // Build interceptor as IIFE
+        await build({
+          configFile: false,
+          build: {
+            outDir: 'dist/content',
+            emptyOutDir: false,
+            minify: false,
+            lib: {
+              entry: resolve(__dirname, 'src/content/interceptor.ts'),
+              name: 'NetworkInterceptor',
+              formats: ['iife'],
+              fileName: () => 'interceptor.js',
+            },
+            rollupOptions: {
+              output: {
+                extend: true,
+              },
+            },
+          },
+        });
+
+        console.log('✓ Built content script and interceptor as IIFE');
+      },
+    },
   ],
   resolve: {
     alias: {
@@ -21,11 +87,11 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    minify: false, // Disable minify for easier debugging
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'src/popup/index.html'),
         sidepanel: resolve(__dirname, 'src/sidepanel/index.html'),
-        content: resolve(__dirname, 'src/content/index.tsx'),
         background: resolve(__dirname, 'src/background/index.ts'),
       },
       output: {
