@@ -162,7 +162,11 @@ export const SidePanelApp: React.FC = () => {
       {/* Content - Scrollable */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {currentView === 'chat' && <ChatView />}
-        {currentView === 'agents' && <AgentsView />}
+        {currentView === 'agents' && (
+          <div className="overflow-auto flex-1">
+            <AgentsView />
+          </div>
+        )}
         {currentView === 'clients' && (
           <div className="overflow-auto flex-1">
             <ClientsView />
