@@ -63,6 +63,48 @@ export abstract class AgentBase {
   private activeProcesses: Set<string> = new Set(); // Track process IDs for cleanup
 
   /**
+   * API bridge for accessing Chrome extension APIs from page context
+   * This provides access to chrome.storage, chrome.tabs, etc. via message passing
+   *
+   * @example
+   * // Storage API
+   * const data = await this.api.storage.get('myKey');
+   * await this.api.storage.set({ myKey: 'value' });
+   *
+   * @example
+   * // Tabs API
+   * await this.api.tabs.create({ url: 'https://example.com' });
+   *
+   * @example
+   * // Notifications API
+   * await this.api.notifications.create({
+   *   type: 'basic',
+   *   title: 'Alert',
+   *   message: 'Task complete'
+   * });
+   */
+  protected get api(): any {
+    // In page context, AgentAPI is available globally
+    if (typeof window !== 'undefined' && (window as any).__AgentAPI) {
+      // Return a singleton instance
+      if (!(window as any).__agentAPIInstance) {
+        (window as any).__agentAPIInstance = new (window as any).__AgentAPI();
+      }
+      return (window as any).__agentAPIInstance;
+    }
+
+    // Fallback for environments where AgentAPI isn't available
+    console.warn('[AgentBase] AgentAPI not available in this context');
+    return {
+      storage: {},
+      tabs: {},
+      notifications: {},
+      network: {},
+      runtime: {}
+    };
+  }
+
+  /**
    * Get agent metadata (ID, name, description, etc.)
    */
   abstract getMetadata(): AgentMetadata;

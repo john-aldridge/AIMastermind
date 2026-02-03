@@ -83,6 +83,33 @@ export class MyAgent extends AgentBase {
 
   private async myCapability(input: string): Promise<string> {
     // Implement your capability logic here
+
+    // Example: Access Chrome APIs via this.api bridge
+    // Storage API:
+    // const data = await this.api.storage.get('myKey');
+    // await this.api.storage.set({ myKey: 'value' });
+    //
+    // Tabs API:
+    // await this.api.tabs.create({ url: 'https://example.com' });
+    //
+    // Notifications API:
+    // await this.api.notifications.create({
+    //   type: 'basic',
+    //   title: 'Alert',
+    //   message: 'Task complete'
+    // });
+    //
+    // DOM Manipulation (works natively in page context):
+    // document.querySelector('.element').textContent = 'Updated';
+    //
+    // Long-running processes (use Process Registry):
+    // const observer = new MutationObserver(() => { ... });
+    // observer.observe(document.body, { childList: true });
+    // this.registerProcess('watch', {
+    //   type: 'mutation-observer',
+    //   cleanup: () => observer.disconnect()
+    // });
+
     return \`Processed: \${input}\`;
   }
 }

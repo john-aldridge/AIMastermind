@@ -4,6 +4,7 @@ import { chromeStorageService } from '@/storage/chromeStorage';
 import { networkMonitor } from '@/utils/networkMonitor';
 import { AutoLoadRuleStorageService } from '@/storage/autoLoadRuleStorage';
 import type { AutoLoadRule } from '@/types/autoLoadRule';
+import { handleAgentAPICall } from '@/bridge/backgroundAPIHandlers';
 
 console.log('Synergy AI background script loaded');
 
@@ -405,6 +406,10 @@ async function handleMessage(
       return handleCheckAutoLoadRules(message.payload);
 
     default:
+      // Handle AgentAPI calls (not in MessageType enum since they come from page context)
+      if ((message as any).type === 'AGENT_API_CALL') {
+        return handleAgentAPICall(message as any);
+      }
       return { success: false, error: 'Unknown message type' };
   }
 }
