@@ -500,7 +500,7 @@ export const EditorApp: React.FC = () => {
               onClick={handleClose}
               className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors flex items-center gap-2 font-medium"
             >
-              Done
+              Close
             </button>
 
             <button
