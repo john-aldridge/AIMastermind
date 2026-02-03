@@ -5,7 +5,6 @@ import { MessageType } from '@/utils/messaging';
 import { javascriptExtractor } from './javascriptExtractor';
 import { cssExtractor } from './cssExtractor';
 import { initializeProcessRegistry, getProcessRegistry } from '@/utils/processRegistry';
-import { initializeAgentAPIBridge } from '@/bridge/contentScriptBridge';
 
 // Inject network interceptor into page context
 const injectInterceptor = () => {
@@ -207,9 +206,6 @@ const initializeContentScript = () => {
 
   // Initialize process registry for tracking long-running agent processes
   initializeProcessRegistry();
-
-  // Initialize AgentAPI bridge for agents to access chrome APIs
-  initializeAgentAPIBridge();
 
   // Inject network interceptor first
   injectInterceptor();
