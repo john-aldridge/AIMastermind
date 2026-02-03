@@ -8,7 +8,7 @@ import type { ClientMetadata } from '@/clients';
 export const ClientsView: React.FC = () => {
   const { clients } = useAppStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [view, setView] = useState<'my-clients' | 'store'>('my-clients');
+  const [view, setView] = useState<'my-clients' | 'purchased'>('my-clients');
   const [registeredClients, setRegisteredClients] = useState<ClientMetadata[]>([]);
 
   useEffect(() => {
@@ -32,14 +32,14 @@ export const ClientsView: React.FC = () => {
           My Clients
         </button>
         <button
-          onClick={() => setView('store')}
+          onClick={() => setView('purchased')}
           className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
-            view === 'store'
+            view === 'purchased'
               ? 'bg-primary-600 text-white'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
           }`}
         >
-          Client Store
+          Purchased Clients
         </button>
       </div>
 
@@ -113,9 +113,9 @@ export const ClientsView: React.FC = () => {
               />
             </svg>
           </div>
-          <p className="text-gray-500 mb-2">Client Store Coming Soon</p>
+          <p className="text-gray-500 mb-2">No Purchased Clients</p>
           <p className="text-sm text-gray-400">
-            Browse and purchase pre-configured API clients for popular services
+            Pre-configured API clients for popular services will appear here
           </p>
         </div>
       )}
