@@ -43,10 +43,15 @@ export const ClientsView: React.FC = () => {
         </button>
       </div>
 
-      {view === 'my-clients' ? (
+      {view === 'purchased' ? (
         <>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">My API Clients</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-800">Purchased Clients</h2>
+              <p className="text-sm text-gray-600">
+                Pre-configured API clients ready to use
+              </p>
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={() => setShowCreateModal(true)}
@@ -74,7 +79,7 @@ export const ClientsView: React.FC = () => {
                   />
                 </svg>
               </div>
-              <p className="text-gray-500 mb-2">No API clients available</p>
+              <p className="text-gray-500 mb-2">No clients available</p>
               <p className="text-sm text-gray-400 mb-4">
                 Import a client to connect external APIs to your AI assistant
               </p>
@@ -109,13 +114,13 @@ export const ClientsView: React.FC = () => {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
               />
             </svg>
           </div>
-          <p className="text-gray-500 mb-2">No Purchased Clients</p>
+          <p className="text-gray-500 mb-2">No Custom Clients</p>
           <p className="text-sm text-gray-400">
-            Pre-configured API clients for popular services will appear here
+            Custom client integrations will appear here
           </p>
         </div>
       )}
