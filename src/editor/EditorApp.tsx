@@ -10,6 +10,7 @@ import { AgentSourceStorageService } from '../storage/agentSourceStorage';
 import { AgentLoader } from '../services/agentLoader';
 import { AgentCompiler } from '../services/agentCompiler';
 import { apiService } from '../utils/api';
+import { BLANK_AGENT_TEMPLATE } from '../templates/agentTemplates';
 
 // Disable Monaco workers globally before any Monaco code runs
 if (typeof window !== 'undefined') {
@@ -22,6 +23,7 @@ if (typeof window !== 'undefined') {
 
 export const EditorApp: React.FC = () => {
   const [agentId, setPluginId] = useState<string | null>(null);
+  const [isNewAgent, setIsNewAgent] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<string>('1.0.0');
   const [pluginName, setPluginName] = useState<string>('');
   const [pluginDescription, setPluginDescription] = useState<string>('');
@@ -110,17 +112,33 @@ export const EditorApp: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('agentId');
-    if (id) {
+    const isNew = params.get('isNew') === 'true';
+
+    if (isNew) {
+      // Generate a temporary ID for new agent
+      const timestamp = Date.now();
+      const tempId = `new-agent-${timestamp}`;
+      setPluginId(tempId);
+      setIsNewAgent(true);
+      setPluginName('New Agent');
+      setPluginDescription('A new custom agent');
+
+      // Load blank template
+      setCode(BLANK_AGENT_TEMPLATE);
+      setOriginalCode(BLANK_AGENT_TEMPLATE);
+      setReadmeContent('');
+      setOriginalReadme('');
+    } else if (id) {
       setPluginId(id);
     }
   }, []);
 
-  // Load plugin when ID is set
+  // Load plugin when ID is set (but not for new agents)
   useEffect(() => {
-    if (agentId) {
+    if (agentId && !isNewAgent) {
       loadPlugin(agentId);
     }
-  }, [agentId]);
+  }, [agentId, isNewAgent]);
 
   // Track unsaved changes
   useEffect(() => {
@@ -203,7 +221,7 @@ export const EditorApp: React.FC = () => {
   };
 
   const handleAutoSave = async () => {
-    if (!agentId || !hasUnsavedChanges) return;
+    if (!agentId || !hasUnsavedChanges || isNewAgent) return; // Don't auto-save new unsaved agents
 
     try {
       await AgentSourceStorageService.saveAgentSource(agentId, code, 'Auto-saved changes', 'Auto-save');
@@ -242,17 +260,45 @@ export const EditorApp: React.FC = () => {
         return;
       }
 
-      // Save based on version bump selection
-      let savedVersion: string;
-      if (versionBump === 'none') {
-        savedVersion = await AgentSourceStorageService.updateCurrentVersion(agentId, code, saveDescription, undefined, readmeContent);
-      } else {
-        savedVersion = await AgentSourceStorageService.saveAgentSource(agentId, code, saveDescription, undefined, versionBump, readmeContent);
-      }
+      if (isNewAgent) {
+        // First save of a new agent - create it
+        await AgentSourceStorageService.createAgent(
+          agentId,
+          pluginName.trim() || 'New Agent',
+          code,
+          saveDescription || 'Initial version',
+          ''
+        );
 
-      // Also update the agent name metadata
-      if (pluginName.trim()) {
-        await AgentSourceStorageService.updateAgentMetadata(agentId, pluginName.trim());
+        // Update README if there's content
+        if (readmeContent.trim()) {
+          await AgentSourceStorageService.saveAgentSource(
+            agentId,
+            code,
+            saveDescription || 'Initial version',
+            undefined,
+            'patch',
+            readmeContent
+          );
+        }
+
+        setIsNewAgent(false); // No longer a new agent after first save
+        showNotification('success', 'Agent created successfully!');
+      } else {
+        // Update existing agent
+        let savedVersion: string;
+        if (versionBump === 'none') {
+          savedVersion = await AgentSourceStorageService.updateCurrentVersion(agentId, code, saveDescription, undefined, readmeContent);
+        } else {
+          savedVersion = await AgentSourceStorageService.saveAgentSource(agentId, code, saveDescription, undefined, versionBump, readmeContent);
+        }
+
+        // Also update the agent name metadata
+        if (pluginName.trim()) {
+          await AgentSourceStorageService.updateAgentMetadata(agentId, pluginName.trim());
+        }
+
+        showNotification('success', `Saved as version ${savedVersion}`);
       }
 
       setOriginalCode(code);
@@ -260,9 +306,9 @@ export const EditorApp: React.FC = () => {
       setHasUnsavedChanges(false);
       setShowSaveModal(false);
 
-      await loadPlugin(agentId);
-
-      showNotification('success', `Saved as version ${savedVersion}`);
+      if (!isNewAgent) {
+        await loadPlugin(agentId);
+      }
     } catch (error) {
       showNotification('error', 'Failed to save: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {

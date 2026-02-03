@@ -11,7 +11,6 @@ import type { AgentMetadata } from '@/agents';
 import { AgentCard } from './AgentCard';
 import { AgentSourceStorageService } from '@/storage/agentSourceStorage';
 import type { AgentSourceStorage } from '@/types/agentSource';
-import { BLANK_AGENT_TEMPLATE } from '@/templates/agentTemplates';
 
 export const AgentsView: React.FC = () => {
   const [view, setView] = useState<'my-agents' | 'purchased'>('purchased');
@@ -65,31 +64,15 @@ export const AgentsView: React.FC = () => {
     });
   };
 
-  const handleCreateNewAgent = async () => {
-    try {
-      // Generate a unique agent ID
-      const timestamp = Date.now();
-      const agentId = `new-agent-${timestamp}`;
-      const agentName = 'New Agent';
+  const handleCreateNewAgent = () => {
+    // Open editor with new agent flag - agent will be created on first save
+    const editorUrl = chrome.runtime.getURL(`src/editor/index.html?isNew=true`);
 
-      // Create blank agent with template
-      await AgentSourceStorageService.createAgent(
-        agentId,
-        agentName,
-        BLANK_AGENT_TEMPLATE,
-        'A new custom agent',
-        ''
-      );
-
-      // Open editor immediately
-      openEditor(agentId);
-
-      // Reload agents list in background
-      loadAgents();
-    } catch (error) {
-      console.error('Failed to create new agent:', error);
-      alert('Failed to create new agent: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    }
+    chrome.windows.create({
+      url: editorUrl,
+      type: 'normal',
+      state: 'maximized',
+    });
   };
 
   return (
