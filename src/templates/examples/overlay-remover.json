@@ -1,0 +1,104 @@
+{
+  "id": "overlay-remover",
+  "name": "Overlay Remover",
+  "description": "Automatically remove modal overlays and popups from web pages",
+  "version": "1.0.0",
+  "author": "Synergy AI",
+  "icon": "🚫",
+  "tags": ["dom-manipulation", "ux", "productivity"],
+  "containsJavaScript": false,
+  "requiresPageAccess": true,
+  "configFields": [
+    {
+      "key": "aggressive_mode",
+      "label": "Aggressive Mode",
+      "type": "select",
+      "required": true,
+      "default": "normal",
+      "options": [
+        { "value": "normal", "label": "Normal - Remove obvious overlays" },
+        { "value": "aggressive", "label": "Aggressive - Remove all suspicious elements" }
+      ],
+      "helpText": "How aggressively to remove overlays"
+    }
+  ],
+  "dependencies": [],
+  "capabilities": [
+    {
+      "name": "remove_overlays_once",
+      "description": "Remove all overlay elements from the current page once",
+      "parameters": [],
+      "trigger": {
+        "type": "manual"
+      },
+      "isLongRunning": false,
+      "actions": [
+        {
+          "type": "if",
+          "condition": {
+            "type": "equals",
+            "left": "{{config.aggressive_mode}}",
+            "right": "aggressive"
+          },
+          "then": [
+            {
+              "type": "querySelectorAll",
+              "selector": ".modal, .popup, .overlay, [class*='overlay'], [class*='modal'], [class*='popup'], [style*='position: fixed'], [style*='z-index']",
+              "saveAs": "overlays"
+            }
+          ],
+          "else": [
+            {
+              "type": "querySelectorAll",
+              "selector": ".modal-overlay, .popup-overlay, .paywall-overlay, [class*='overlay'][style*='fixed']",
+              "saveAs": "overlays"
+            }
+          ]
+        },
+        {
+          "type": "forEach",
+          "source": "overlays",
+          "itemAs": "overlay",
+          "do": [
+            {
+              "type": "remove",
+              "target": "overlay"
+            }
+          ]
+        },
+        {
+          "type": "querySelectorAll",
+          "selector": "body",
+          "saveAs": "body"
+        },
+        {
+          "type": "forEach",
+          "source": "body",
+          "itemAs": "bodyEl",
+          "do": [
+            {
+              "type": "addStyle",
+              "target": "bodyEl",
+              "styles": {
+                "overflow": "auto",
+                "position": ""
+              }
+            }
+          ]
+        },
+        {
+          "type": "notify",
+          "title": "Overlays Removed",
+          "message": "Removed {{overlays.length}} overlay elements"
+        },
+        {
+          "type": "return",
+          "value": {
+            "success": true,
+            "removed": "{{overlays.length}}"
+          }
+        }
+      ]
+    }
+  ]
+}

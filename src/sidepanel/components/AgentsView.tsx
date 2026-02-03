@@ -91,11 +91,6 @@ export const AgentsView: React.FC = () => {
     });
   };
 
-  const handleCreateConfigAgent = () => {
-    setEditingConfigId(undefined);
-    setShowConfigEditor(true);
-  };
-
   const handleEditConfigAgent = (agentId: string) => {
     setEditingConfigId(agentId);
     setShowConfigEditor(true);
@@ -217,26 +212,15 @@ export const AgentsView: React.FC = () => {
                 Create and manage your custom agents
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleCreateConfigAgent}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                New Config Agent
-              </button>
-              <button
-                onClick={handleCreateNewAgent}
-                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                New Code Agent
-              </button>
-            </div>
+            <button
+              onClick={handleCreateNewAgent}
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Agent
+            </button>
           </div>
 
           <div className="space-y-3">
@@ -343,20 +327,12 @@ export const AgentsView: React.FC = () => {
                   </svg>
                 </div>
                 <p className="text-gray-500 mb-4">No agents yet</p>
-                <div className="flex items-center justify-center gap-3">
-                  <button
-                    onClick={handleCreateConfigAgent}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    Create Config Agent
-                  </button>
-                  <button
-                    onClick={handleCreateNewAgent}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                  >
-                    Create Code Agent
-                  </button>
-                </div>
+                <button
+                  onClick={handleCreateNewAgent}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                >
+                  Create New Agent
+                </button>
               </div>
             )}
           </div>

@@ -6,11 +6,10 @@ import { ResizablePanel } from './ResizablePanel';
 import { ResourcesPane, ResourceType } from './components/ResourcesPane';
 import { MarkdownPreview } from './components/MarkdownPreview';
 import { getExampleAgent } from '../templates/exampleAgents';
-import { AgentSourceStorageService } from '../storage/agentSourceStorage';
-import { AgentLoader } from '../services/agentLoader';
-import { AgentCompiler } from '../services/agentCompiler';
 import { apiService } from '../utils/api';
-import { BLANK_AGENT_TEMPLATE } from '../templates/agentTemplates';
+import { ConfigStorageService } from '../storage/configStorage';
+import { ConfigRegistry } from '../services/configRegistry';
+import type { AgentConfig } from '../types/agentConfig';
 
 // Disable Monaco workers globally before any Monaco code runs
 if (typeof window !== 'undefined') {
@@ -20,6 +19,39 @@ if (typeof window !== 'undefined') {
     }
   };
 }
+
+// Blank agent config template
+const BLANK_AGENT_CONFIG_TEMPLATE = JSON.stringify({
+  id: "new-agent",
+  name: "New Agent",
+  description: "A new custom agent",
+  version: "1.0.0",
+  author: "Your Name",
+  icon: "🤖",
+  tags: [],
+  containsJavaScript: false,
+  requiresPageAccess: false,
+  configFields: [],
+  dependencies: [],
+  capabilities: [
+    {
+      name: "example_capability",
+      description: "An example capability",
+      parameters: [],
+      trigger: {
+        type: "manual"
+      },
+      isLongRunning: false,
+      actions: [
+        {
+          type: "notify",
+          title: "Hello from Agent",
+          message: "This is an example capability"
+        }
+      ]
+    }
+  ]
+}, null, 2);
 
 export const EditorApp: React.FC = () => {
   const [agentId, setPluginId] = useState<string | null>(null);
@@ -123,9 +155,9 @@ export const EditorApp: React.FC = () => {
       setPluginName('New Agent');
       setPluginDescription('A new custom agent');
 
-      // Load blank template
-      setCode(BLANK_AGENT_TEMPLATE);
-      setOriginalCode(BLANK_AGENT_TEMPLATE);
+      // Load blank config template
+      setCode(BLANK_AGENT_CONFIG_TEMPLATE);
+      setOriginalCode(BLANK_AGENT_CONFIG_TEMPLATE);
       setReadmeContent('');
       setOriginalReadme('');
     } else if (id) {
@@ -166,47 +198,28 @@ export const EditorApp: React.FC = () => {
 
   const loadPlugin = async (id: string) => {
     try {
-      const agentSource = await AgentSourceStorageService.loadAgentSource(id);
-      if (agentSource) {
-        setPluginName(agentSource.name);
-        setCurrentVersion(agentSource.activeVersion);
+      const agentConfig = await ConfigStorageService.loadAgentConfig(id);
+      if (agentConfig) {
+        setPluginName(agentConfig.name);
+        setPluginDescription(agentConfig.description);
+        setCurrentVersion(agentConfig.version);
 
-        const versionCode = agentSource.versions[agentSource.activeVersion]?.code || '';
-        const versionReadme = agentSource.versions[agentSource.activeVersion]?.readme || '';
-        const versionMetadata = agentSource.versions[agentSource.activeVersion]?.metadata;
-        setPluginDescription(versionMetadata?.description || '');
-
-        setCode(versionCode);
-        setOriginalCode(versionCode);
-        setReadmeContent(versionReadme);
-        setOriginalReadme(versionReadme);
+        const configJson = JSON.stringify(agentConfig, null, 2);
+        setCode(configJson);
+        setOriginalCode(configJson);
+        setReadmeContent(''); // Configs don't have separate README
+        setOriginalReadme('');
         setHasUnsavedChanges(false);
       }
     } catch (error) {
-      showNotification('error', 'Failed to load plugin: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showNotification('error', 'Failed to load agent: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
-  const handleVersionChange = async (version: string) => {
-    if (hasUnsavedChanges) {
-      if (!confirm('You have unsaved changes. Discard them?')) {
-        return;
-      }
-    }
-
-    if (!agentId) return;
-
-    try {
-      const versionCode = await AgentSourceStorageService.loadAgentVersion(agentId, version);
-      if (versionCode) {
-        setCode(versionCode);
-        setOriginalCode(versionCode);
-        setCurrentVersion(version);
-        setHasUnsavedChanges(false);
-      }
-    } catch (error) {
-      showNotification('error', 'Failed to load version: ' + (error instanceof Error ? error.message : 'Unknown error'));
-    }
+  const handleVersionChange = async (_version: string) => {
+    // Config-based agents don't have separate versions in storage
+    // The version is just a property in the JSON config
+    showNotification('error', 'Version management not available for config-based agents. Edit the version field in the JSON config directly.');
   };
 
   const handleCodeChange = (newCode: string) => {
@@ -224,14 +237,29 @@ export const EditorApp: React.FC = () => {
     if (!agentId || !hasUnsavedChanges || isNewAgent) return; // Don't auto-save new unsaved agents
 
     try {
-      await AgentSourceStorageService.saveAgentSource(agentId, code, 'Auto-saved changes', 'Auto-save');
+      // Parse and validate JSON
+      let config: AgentConfig;
+      try {
+        config = JSON.parse(code);
+      } catch (parseError) {
+        console.error('Auto-save failed: Invalid JSON', parseError);
+        return;
+      }
+
+      // Validate config schema
+      const validation = ConfigStorageService.validateAgentConfig(config);
+      if (!validation.valid) {
+        console.error('Auto-save failed: Invalid config', validation.errors);
+        return;
+      }
+
+      // Save the config
+      await ConfigStorageService.saveAgentConfig(config);
 
       setOriginalCode(code);
       setHasUnsavedChanges(false);
 
-      await loadPlugin(agentId);
-
-      console.log('Auto-saved plugin:', agentId);
+      console.log('Auto-saved agent config:', agentId);
     } catch (error) {
       console.error('Auto-save failed:', error);
     }
@@ -252,63 +280,46 @@ export const EditorApp: React.FC = () => {
     setIsSaving(true);
 
     try {
-      const compilationResult = AgentCompiler.compile(code);
-      if (!compilationResult.success) {
-        showNotification('error', 'Cannot save: Compilation failed\n' + compilationResult.errors?.join('\n'));
+      // Parse and validate JSON
+      let config: AgentConfig;
+      try {
+        config = JSON.parse(code);
+      } catch (parseError) {
+        showNotification('error', 'Cannot save: Invalid JSON\n' + (parseError instanceof Error ? parseError.message : 'Unknown error'));
         setIsSaving(false);
         setShowSaveModal(false);
         return;
       }
 
-      if (isNewAgent) {
-        // First save of a new agent - create it
-        await AgentSourceStorageService.createAgent(
-          agentId,
-          pluginName.trim() || 'New Agent',
-          code,
-          saveDescription || 'Initial version',
-          ''
-        );
-
-        // Update README if there's content
-        if (readmeContent.trim()) {
-          await AgentSourceStorageService.saveAgentSource(
-            agentId,
-            code,
-            saveDescription || 'Initial version',
-            undefined,
-            'patch',
-            readmeContent
-          );
-        }
-
-        setIsNewAgent(false); // No longer a new agent after first save
-        showNotification('success', 'Agent created successfully!');
-      } else {
-        // Update existing agent
-        let savedVersion: string;
-        if (versionBump === 'none') {
-          savedVersion = await AgentSourceStorageService.updateCurrentVersion(agentId, code, saveDescription, undefined, readmeContent);
-        } else {
-          savedVersion = await AgentSourceStorageService.saveAgentSource(agentId, code, saveDescription, undefined, versionBump, readmeContent);
-        }
-
-        // Also update the agent name metadata
-        if (pluginName.trim()) {
-          await AgentSourceStorageService.updateAgentMetadata(agentId, pluginName.trim());
-        }
-
-        showNotification('success', `Saved as version ${savedVersion}`);
+      // Validate config schema
+      const validation = ConfigStorageService.validateAgentConfig(config);
+      if (!validation.valid) {
+        showNotification('error', 'Cannot save: Invalid config\n' + validation.errors.join('\n'));
+        setIsSaving(false);
+        setShowSaveModal(false);
+        return;
       }
 
-      setOriginalCode(code);
-      setOriginalReadme(readmeContent);
+      // Update config metadata from form inputs
+      config.name = pluginName.trim() || config.name;
+      config.description = pluginDescription.trim() || config.description;
+
+      // Save the config
+      await ConfigStorageService.saveAgentConfig(config);
+
+      // Register with config registry
+      const registry = ConfigRegistry.getInstance();
+      registry.registerAgent(config);
+
+      setIsNewAgent(false);
+      setOriginalCode(JSON.stringify(config, null, 2));
       setHasUnsavedChanges(false);
       setShowSaveModal(false);
 
-      if (!isNewAgent) {
-        await loadPlugin(agentId);
-      }
+      showNotification('success', 'Agent saved successfully!');
+
+      // Reload to show updated config
+      await loadPlugin(config.id);
     } catch (error) {
       showNotification('error', 'Failed to save: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
@@ -322,19 +333,44 @@ export const EditorApp: React.FC = () => {
     setIsTesting(true);
 
     try {
-      const validation = await AgentLoader.validatePlugin(code);
-
-      if (!validation.valid) {
-        showNotification('error', 'Compilation failed:\n' + validation.errors.join('\n'));
+      // Parse and validate JSON
+      let config: AgentConfig;
+      try {
+        config = JSON.parse(code);
+      } catch (parseError) {
+        showNotification('error', 'Test failed: Invalid JSON\n' + (parseError instanceof Error ? parseError.message : 'Unknown error'));
         setIsTesting(false);
         return;
       }
 
-      await AgentLoader.hotReload(agentId);
+      // Validate config schema
+      const validation = ConfigStorageService.validateAgentConfig(config);
+      if (!validation.valid) {
+        showNotification('error', 'Test failed: Invalid config\n' + validation.errors.join('\n'));
+        setIsTesting(false);
+        return;
+      }
 
-      showNotification('success', 'Plugin hot reloaded successfully!');
+      // Test by executing the first capability
+      const registry = ConfigRegistry.getInstance();
+
+      // Temporarily register this config for testing
+      registry.registerAgent(config);
+
+      if (config.capabilities.length > 0) {
+        const firstCapability = config.capabilities[0];
+        const result = await registry.executeAgentCapability(config.id, firstCapability.name, {}, {});
+
+        if (result.success) {
+          showNotification('success', `Test successful! Executed "${firstCapability.name}" capability.`);
+        } else {
+          showNotification('error', `Test failed: ${result.error}`);
+        }
+      } else {
+        showNotification('success', 'Config is valid! No capabilities to test.');
+      }
     } catch (error) {
-      showNotification('error', 'Hot reload failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showNotification('error', 'Test failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setIsTesting(false);
     }
@@ -348,7 +384,7 @@ export const EditorApp: React.FC = () => {
   const handleDownload = () => {
     if (!agentId || !pluginName) return;
 
-    // Create downloadable files
+    // Create downloadable file
     const downloadFile = (content: string, filename: string, mimeType: string) => {
       const blob = new Blob([content], { type: mimeType });
       const url = URL.createObjectURL(blob);
@@ -361,32 +397,29 @@ export const EditorApp: React.FC = () => {
       URL.revokeObjectURL(url);
     };
 
-    // Download code file
-    const codeFilename = `${agentId}.ts`;
-    downloadFile(code, codeFilename, 'text/typescript');
+    // Download config file
+    const configFilename = `${agentId}.json`;
+    downloadFile(code, configFilename, 'application/json');
 
-    // Download README file if it has content
-    if (readmeContent.trim()) {
-      setTimeout(() => {
-        const readmeFilename = `${agentId}-README.md`;
-        downloadFile(readmeContent, readmeFilename, 'text/markdown');
-      }, 100); // Small delay to avoid browser blocking multiple downloads
-    }
-
-    showNotification('success', 'Agent files downloaded successfully');
+    showNotification('success', 'Agent config downloaded successfully');
   };
 
   const handleDelete = async () => {
     if (!agentId) return;
 
-    const confirmMessage = `Are you sure you want to delete "${pluginName}"?\n\nThis will permanently delete all versions of this agent.\nThis action cannot be undone.`;
+    const confirmMessage = `Are you sure you want to delete "${pluginName}"?\n\nThis action cannot be undone.`;
 
     if (!confirm(confirmMessage)) {
       return;
     }
 
     try {
-      await AgentSourceStorageService.deleteAgentSource(agentId);
+      await ConfigStorageService.deleteAgentConfig(agentId);
+
+      // Remove from registry
+      const registry = ConfigRegistry.getInstance();
+      registry.removeAgent(agentId);
+
       showNotification('success', `Agent "${pluginName}" deleted successfully`);
 
       // Close the editor window after a brief delay
@@ -567,11 +600,11 @@ export const EditorApp: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <span>
                     {selectedResource === 'agent-code'
-                      ? 'Agent Code'
+                      ? 'Agent'
                       : selectedResource === 'readme'
                       ? 'README'
                       : selectedResource.includes('code')
-                      ? 'Example Code'
+                      ? 'Example Config'
                       : 'Example README'}
                   </span>
                   {isViewingExample && (
@@ -627,6 +660,7 @@ export const EditorApp: React.FC = () => {
                     <MonacoEditor
                       value={code}
                       onChange={isViewingExample ? () => {} : handleCodeChange}
+                      language="json"
                       theme="vs-dark"
                       readOnly={isViewingExample}
                     />

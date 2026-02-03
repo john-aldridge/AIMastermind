@@ -1,0 +1,63 @@
+{
+  "id": "price-extractor",
+  "name": "Price Extractor",
+  "description": "Extract product prices from e-commerce sites",
+  "version": "1.0.0",
+  "author": "Synergy AI",
+  "icon": "💰",
+  "tags": ["scraping", "e-commerce", "javascript"],
+  "containsJavaScript": true,
+  "requiresPageAccess": true,
+  "configFields": [],
+  "dependencies": [],
+  "capabilities": [
+    {
+      "name": "extract_price",
+      "description": "Extract the main product price from the current page",
+      "parameters": [],
+      "trigger": {
+        "type": "manual"
+      },
+      "isLongRunning": false,
+      "actions": [
+        {
+          "type": "executeScript",
+          "script": "// Find price elements using multiple selectors\nconst priceSelectors = [\n  '.price',\n  '[data-price]',\n  '.product-price',\n  '[itemprop=\"price\"]',\n  '.sale-price'\n];\n\nfor (const selector of priceSelectors) {\n  const el = document.querySelector(selector);\n  if (el) {\n    let priceText = el.textContent || el.getAttribute('content') || el.getAttribute('data-price');\n\n    // Extract numeric value\n    const match = priceText.match(/[\\d,]+\\.?\\d*/);\n    if (match) {\n      const price = parseFloat(match[0].replace(/,/g, ''));\n      const currency = priceText.match(/[$£€¥]/)?.[0] || 'USD';\n\n      return {\n        price: price,\n        currency: currency,\n        originalText: priceText.trim(),\n        selector: selector\n      };\n    }\n  }\n}\n\nreturn null;",
+          "saveAs": "priceData"
+        },
+        {
+          "type": "if",
+          "condition": {
+            "type": "exists",
+            "target": "priceData"
+          },
+          "then": [
+            {
+              "type": "notify",
+              "title": "Price Found",
+              "message": "{{priceData.currency}}{{priceData.price}}"
+            },
+            {
+              "type": "return",
+              "value": "{{priceData}}"
+            }
+          ],
+          "else": [
+            {
+              "type": "notify",
+              "title": "Price Not Found",
+              "message": "Could not find price on this page"
+            },
+            {
+              "type": "return",
+              "value": {
+                "success": false,
+                "error": "No price found"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
