@@ -7,9 +7,10 @@ import { NetworkSettings } from './NetworkSettings';
 import { AutoLoadRulesView } from './AutoLoadRulesView';
 import { ProcessMonitorView } from './ProcessMonitorView';
 import { ProviderConfig, getProviderById } from '@/utils/providers';
+import { SettingsService, ExtensionSettings } from '@/services/settingsService';
 
 type NotificationType = 'success' | 'error' | null;
-type SettingsSection = 'main' | 'models' | 'network' | 'auto-load' | 'processes' | 'billing' | 'cloud-sync';
+type SettingsSection = 'main' | 'models' | 'network' | 'auto-load' | 'processes' | 'billing' | 'cloud-sync' | 'security';
 
 export const SettingsView: React.FC = () => {
   const { userConfig, updateUserConfig, addConfiguration } = useAppStore();
@@ -20,8 +21,9 @@ export const SettingsView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState<{ type: NotificationType; message: string } | null>(null);
   const [showConfigForm, setShowConfigForm] = useState(false);
+  const [extensionSettings, setExtensionSettings] = useState<ExtensionSettings | null>(null);
 
-  // Load saved provider on mount
+  // Load saved provider and extension settings on mount
   useEffect(() => {
     if (userConfig.providerId) {
       const provider = getProviderById(userConfig.providerId);
@@ -30,6 +32,9 @@ export const SettingsView: React.FC = () => {
         setCredentials(userConfig.providerCredentials || {});
       }
     }
+
+    // Load extension settings
+    SettingsService.getSettings().then(setExtensionSettings);
   }, []);
 
   const handleProviderSelect = (provider: ProviderConfig) => {
@@ -257,6 +262,24 @@ export const SettingsView: React.FC = () => {
             <div className="text-left">
               <div className="font-medium text-gray-800">Active Processes</div>
               <div className="text-xs text-gray-500">Monitor long-running agent processes</div>
+            </div>
+          </div>
+          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('security')}
+          className="w-full px-4 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors border-b border-gray-200"
+        >
+          <div className="flex items-center gap-3">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <div className="text-left">
+              <div className="font-medium text-gray-800">Security</div>
+              <div className="text-xs text-gray-500">JavaScript execution and security settings</div>
             </div>
           </div>
           <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -537,6 +560,154 @@ export const SettingsView: React.FC = () => {
     <NetworkSettings />
   );
 
+  // Render Security settings
+  const renderSecuritySettings = () => {
+    if (!extensionSettings) {
+      return <div className="text-sm text-gray-500">Loading settings...</div>;
+    }
+
+    const handleToggleSetting = async (key: keyof ExtensionSettings) => {
+      const newValue = !extensionSettings[key];
+      await SettingsService.updateSettings({ [key]: newValue });
+      setExtensionSettings({ ...extensionSettings, [key]: newValue });
+    };
+
+    return (
+      <>
+        {/* JavaScript Execution Warning */}
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <h3 className="font-semibold text-amber-900 mb-1">Security Notice</h3>
+              <p className="text-sm text-amber-800">
+                Some config-based agents may contain JavaScript code that runs in the page context.
+                These settings control whether such agents can execute. Only enable if you trust the source of your agents.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* JavaScript Execution Settings */}
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          {/* Allow JavaScript */}
+          <div className="p-4 border-b border-gray-200">
+            <div className="flex items-start justify-between">
+              <div className="flex-1 mr-4">
+                <div className="font-medium text-gray-900 mb-1">
+                  Allow JavaScript in Configs
+                </div>
+                <div className="text-sm text-gray-600">
+                  Enable execution of JavaScript snippets in config-based agents.
+                  JavaScript runs in page context and cannot access extension APIs or credentials.
+                </div>
+              </div>
+              <button
+                onClick={() => handleToggleSetting('allowJavaScriptInConfigs')}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                  extensionSettings.allowJavaScriptInConfigs ? 'bg-primary-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    extensionSettings.allowJavaScriptInConfigs ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Warn Before Executing */}
+          <div className={`p-4 border-b border-gray-200 ${!extensionSettings.allowJavaScriptInConfigs ? 'opacity-50' : ''}`}>
+            <div className="flex items-start justify-between">
+              <div className="flex-1 mr-4">
+                <div className="font-medium text-gray-900 mb-1">
+                  Warn Before Executing JavaScript
+                </div>
+                <div className="text-sm text-gray-600">
+                  Show a warning dialog before executing any config that contains JavaScript.
+                </div>
+              </div>
+              <button
+                onClick={() => handleToggleSetting('warnBeforeExecutingJS')}
+                disabled={!extensionSettings.allowJavaScriptInConfigs}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed ${
+                  extensionSettings.warnBeforeExecutingJS ? 'bg-primary-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    extensionSettings.warnBeforeExecutingJS ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Show JS Snippets */}
+          <div className={`p-4 ${!extensionSettings.allowJavaScriptInConfigs ? 'opacity-50' : ''}`}>
+            <div className="flex items-start justify-between">
+              <div className="flex-1 mr-4">
+                <div className="font-medium text-gray-900 mb-1">
+                  Show JavaScript Snippets Before Execution
+                </div>
+                <div className="text-sm text-gray-600">
+                  Display JavaScript code in a review dialog before first execution, allowing you to inspect it.
+                </div>
+              </div>
+              <button
+                onClick={() => handleToggleSetting('showJSSnippetsBeforeExecution')}
+                disabled={!extensionSettings.allowJavaScriptInConfigs}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed ${
+                  extensionSettings.showJSSnippetsBeforeExecution ? 'bg-primary-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    extensionSettings.showJSSnippetsBeforeExecution ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Info */}
+        <div className="mt-4 text-sm text-gray-600 bg-gray-50 rounded-lg p-4">
+          <h4 className="font-medium text-gray-900 mb-2">What JavaScript Can and Cannot Do</h4>
+          <div className="space-y-2">
+            <div className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-green-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span>Access and manipulate page DOM</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-green-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span>Read page JavaScript variables</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-red-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <span>Access chrome.* extension APIs</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <svg className="w-4 h-4 text-red-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <span>Access stored credentials or API keys</span>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  };
+
   // Render Cloud Sync settings
   const renderCloudSyncSettings = () => (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -574,6 +745,7 @@ export const SettingsView: React.FC = () => {
           {activeSection === 'network' && 'Network Monitoring'}
           {activeSection === 'auto-load' && 'Auto-Load Rules'}
           {activeSection === 'processes' && 'Active Processes'}
+          {activeSection === 'security' && 'Security'}
           {activeSection === 'billing' && 'Billing'}
           {activeSection === 'cloud-sync' && 'Cloud Sync'}
         </h2>
@@ -585,6 +757,7 @@ export const SettingsView: React.FC = () => {
       {activeSection === 'network' && renderNetworkSettings()}
       {activeSection === 'auto-load' && <AutoLoadRulesView />}
       {activeSection === 'processes' && <ProcessMonitorView />}
+      {activeSection === 'security' && renderSecuritySettings()}
       {activeSection === 'billing' && renderBillingSettings()}
       {activeSection === 'cloud-sync' && renderCloudSyncSettings()}
     </div>
