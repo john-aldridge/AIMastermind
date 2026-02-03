@@ -14,7 +14,7 @@ import type { AgentSourceStorage } from '@/types/agentSource';
 import { BLANK_AGENT_TEMPLATE } from '@/templates/agentTemplates';
 
 export const AgentsView: React.FC = () => {
-  const [view, setView] = useState<'my-agents' | 'purchased'>('my-agents');
+  const [view, setView] = useState<'my-agents' | 'purchased'>('purchased');
   const [builtInAgents, setBuiltInAgents] = useState<AgentMetadata[]>([]);
   const [customAgents, setCustomAgents] = useState<AgentSourceStorage[]>([]);
 
@@ -97,16 +97,6 @@ export const AgentsView: React.FC = () => {
       {/* View Selector */}
       <div className="flex gap-2 mb-4">
         <button
-          onClick={() => setView('my-agents')}
-          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
-            view === 'my-agents'
-              ? 'bg-primary-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          My Agents
-        </button>
-        <button
           onClick={() => setView('purchased')}
           className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
             view === 'purchased'
@@ -115,6 +105,16 @@ export const AgentsView: React.FC = () => {
           }`}
         >
           Purchased Agents
+        </button>
+        <button
+          onClick={() => setView('my-agents')}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+            view === 'my-agents'
+              ? 'bg-primary-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          My Agents
         </button>
       </div>
 

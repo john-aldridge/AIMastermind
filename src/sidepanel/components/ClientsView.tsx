@@ -8,7 +8,7 @@ import type { ClientMetadata } from '@/clients';
 export const ClientsView: React.FC = () => {
   const { clients } = useAppStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [view, setView] = useState<'my-clients' | 'purchased'>('my-clients');
+  const [view, setView] = useState<'my-clients' | 'purchased'>('purchased');
   const [registeredClients, setRegisteredClients] = useState<ClientMetadata[]>([]);
 
   useEffect(() => {
@@ -22,16 +22,6 @@ export const ClientsView: React.FC = () => {
       {/* View Selector */}
       <div className="flex gap-2 mb-4">
         <button
-          onClick={() => setView('my-clients')}
-          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
-            view === 'my-clients'
-              ? 'bg-primary-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          My Clients
-        </button>
-        <button
           onClick={() => setView('purchased')}
           className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
             view === 'purchased'
@@ -40,6 +30,16 @@ export const ClientsView: React.FC = () => {
           }`}
         >
           Purchased Clients
+        </button>
+        <button
+          onClick={() => setView('my-clients')}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+            view === 'my-clients'
+              ? 'bg-primary-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          My Clients
         </button>
       </div>
 
