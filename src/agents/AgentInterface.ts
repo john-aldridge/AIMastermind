@@ -1,11 +1,11 @@
 /**
- * Plugin Interface
+ * Agent Interface
  *
- * Plugins are high-level features that can depend on one or more clients.
- * Unlike clients, plugins don't require authentication - they use configured clients as dependencies.
+ * Agents are high-level features that can depend on one or more clients.
+ * Unlike clients, agents don't require authentication - they use configured clients as dependencies.
  */
 
-export interface PluginMetadata {
+export interface AgentMetadata {
   id: string;
   name: string;
   description: string;
@@ -27,7 +27,7 @@ export interface ConfigField {
   default?: any;
 }
 
-export interface PluginCapabilityDefinition {
+export interface AgentCapabilityDefinition {
   name: string;
   description: string;
   parameters: Array<{
@@ -49,29 +49,29 @@ export interface CapabilityResult {
   };
 }
 
-export abstract class PluginBase {
+export abstract class AgentBase {
   protected config: Record<string, any> = {};
   protected dependencies: Map<string, any> = new Map();
 
   /**
-   * Get plugin metadata (ID, name, description, etc.)
+   * Get agent metadata (ID, name, description, etc.)
    */
-  abstract getMetadata(): PluginMetadata;
+  abstract getMetadata(): AgentMetadata;
 
   /**
-   * Get configuration fields needed by this plugin
+   * Get configuration fields needed by this agent
    */
   abstract getConfigFields(): ConfigField[];
 
   /**
-   * Get list of client IDs this plugin depends on
+   * Get list of client IDs this agent depends on
    */
   abstract getDependencies(): string[];
 
   /**
-   * Get capabilities exposed by this plugin
+   * Get capabilities exposed by this agent
    */
-  abstract getCapabilities(): PluginCapabilityDefinition[];
+  abstract getCapabilities(): AgentCapabilityDefinition[];
 
   /**
    * Execute a capability
@@ -82,7 +82,7 @@ export abstract class PluginBase {
   ): Promise<CapabilityResult>;
 
   /**
-   * Initialize the plugin (optional override)
+   * Initialize the agent (optional override)
    */
   async initialize(): Promise<void> {
     // Optional initialization logic

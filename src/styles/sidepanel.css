@@ -2,9 +2,8 @@
 
 /* Set comfortable default width for side panel */
 body {
-  min-width: 420px;
-  width: 480px;
-  max-width: 600px;
+  width: 100%;
+  min-width: 360px;
 }
 
 /* Ensure side panel has proper sizing */
@@ -21,10 +20,9 @@ body {
 }
 
 /* Optimize for side panel's vertical layout */
-@media (max-width: 450px) {
+@media (max-width: 400px) {
   body {
-    min-width: 360px;
-    width: 100%;
+    min-width: 320px;
   }
 }
 

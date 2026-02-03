@@ -1,20 +1,20 @@
 /**
- * Plugin Card Component
+ * Agent Card Component
  *
- * Displays a plugin with its configuration status and allows configuration.
+ * Displays an agent with its configuration status and allows configuration.
  */
 
 import React, { useState, useEffect } from 'react';
-import type { PluginMetadata } from '@/plugins';
-import { PluginRegistry } from '@/plugins';
-import { PluginConfigEditor } from './PluginConfigEditor';
+import type { AgentMetadata } from '@/agents';
+import { AgentRegistry } from '@/agents';
+import { AgentConfigEditor } from './AgentConfigEditor';
 
-interface PluginCardProps {
-  plugin: PluginMetadata;
+interface AgentCardProps {
+  agent: AgentMetadata;
   onUpdate: () => void;
 }
 
-export const PluginCard: React.FC<PluginCardProps> = ({ plugin, onUpdate }) => {
+export const AgentCard: React.FC<AgentCardProps> = ({ agent, onUpdate }) => {
   const [expanded, setExpanded] = useState(false);
   const [showConfigEditor, setShowConfigEditor] = useState(false);
   const [isConfigured, setIsConfigured] = useState(false);
@@ -22,24 +22,24 @@ export const PluginCard: React.FC<PluginCardProps> = ({ plugin, onUpdate }) => {
 
   useEffect(() => {
     checkConfiguration();
-  }, [plugin.id]);
+  }, [agent.id]);
 
   const checkConfiguration = async () => {
     // Check if plugin is configured
-    const storageKey = `plugin:${plugin.id}`;
+    const storageKey = `plugin:${agent.id}`;
     const data = await chrome.storage.local.get(storageKey);
     const config = data[storageKey];
 
     setIsConfigured(!!config?.config && Object.keys(config.config).length > 0);
 
     // Check dependencies
-    const canResolve = PluginRegistry.canResolveDependencies(plugin.id);
+    const canResolve = AgentRegistry.canResolveDependencies(agent.id);
     setHasDependencies(canResolve);
   };
 
-  const pluginInstance = PluginRegistry.getInstance(plugin.id);
-  const dependencies = pluginInstance?.getDependencies() || [];
-  const capabilities = pluginInstance?.getCapabilities() || [];
+  const agentInstance = AgentRegistry.getInstance(agent.id);
+  const dependencies = agentInstance?.getDependencies() || [];
+  const capabilities = agentInstance?.getCapabilities() || [];
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -47,8 +47,8 @@ export const PluginCard: React.FC<PluginCardProps> = ({ plugin, onUpdate }) => {
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              {plugin.icon && <span className="text-2xl">{plugin.icon}</span>}
-              <h3 className="font-semibold text-gray-800">{plugin.name}</h3>
+              {agent.icon && <span className="text-2xl">{agent.icon}</span>}
+              <h3 className="font-semibold text-gray-800">{agent.name}</h3>
               {!isConfigured && (
                 <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
                   Not Configured
@@ -65,12 +65,12 @@ export const PluginCard: React.FC<PluginCardProps> = ({ plugin, onUpdate }) => {
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">{plugin.description}</p>
+            <p className="text-xs text-gray-500 mt-1">{agent.description}</p>
 
             <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
               <span>{capabilities.length} capabilities</span>
               <span>•</span>
-              <span>v{plugin.version}</span>
+              <span>v{agent.version}</span>
               {dependencies.length > 0 && (
                 <>
                   <span>•</span>
@@ -189,10 +189,10 @@ export const PluginCard: React.FC<PluginCardProps> = ({ plugin, onUpdate }) => {
         </div>
       )}
 
-      {showConfigEditor && pluginInstance && (
-        <PluginConfigEditor
-          plugin={plugin}
-          pluginInstance={pluginInstance}
+      {showConfigEditor && agentInstance && (
+        <AgentConfigEditor
+          agent={agent}
+          agentInstance={agentInstance}
           onClose={() => {
             setShowConfigEditor(false);
             checkConfiguration();

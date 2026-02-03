@@ -1,29 +1,29 @@
 /**
- * Plugin Configuration Editor
+ * Agent Configuration Editor
  *
- * Handles configuration for plugins.
- * Uses the plugin's getConfigFields() to build the form dynamically.
+ * Handles configuration for agents.
+ * Uses the agent's getConfigFields() to build the form dynamically.
  */
 
 import React, { useState } from 'react';
-import type { PluginMetadata } from '@/plugins';
-import type { PluginBase } from '@/plugins';
+import type { AgentMetadata } from '@/agents';
+import type { AgentBase } from '@/agents';
 import { ClientRegistry } from '@/clients';
 
-interface PluginConfigEditorProps {
-  plugin: PluginMetadata;
-  pluginInstance: PluginBase;
+interface AgentConfigEditorProps {
+  agent: AgentMetadata;
+  agentInstance: AgentBase;
   onClose: () => void;
 }
 
-export const PluginConfigEditor: React.FC<PluginConfigEditorProps> = ({
-  plugin,
-  pluginInstance,
+export const AgentConfigEditor: React.FC<AgentConfigEditorProps> = ({
+  agent,
+  agentInstance,
   onClose,
 }) => {
-  const configFields = pluginInstance.getConfigFields();
+  const configFields = agentInstance.getConfigFields();
   const [config, setConfig] = useState<Record<string, string>>(
-    pluginInstance.getConfig() || {}
+    agentInstance.getConfig() || {}
   );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -34,7 +34,7 @@ export const PluginConfigEditor: React.FC<PluginConfigEditorProps> = ({
   };
 
   const handleSave = async () => {
-    console.log(`[PluginConfigEditor] Starting save for ${plugin.name}`);
+    console.log(`[PluginConfigEditor] Starting save for ${agent.name}`);
     console.log('[PluginConfigEditor] Config:', config);
 
     setError(null);
@@ -45,12 +45,12 @@ export const PluginConfigEditor: React.FC<PluginConfigEditorProps> = ({
       // Set config on the plugin instance
       setStatusMessage('Setting configuration...');
       console.log('[PluginConfigEditor] Setting config on plugin instance...');
-      pluginInstance.setConfig(config);
+      agentInstance.setConfig(config);
 
       // Validate configuration
       setStatusMessage('Validating configuration...');
       console.log('[PluginConfigEditor] Validating config...');
-      const validation = await pluginInstance.validateConfig();
+      const validation = await agentInstance.validateConfig();
       console.log('[PluginConfigEditor] Validation result:', validation);
 
       if (!validation.valid) {
@@ -63,7 +63,7 @@ export const PluginConfigEditor: React.FC<PluginConfigEditorProps> = ({
 
       // Check dependencies
       setStatusMessage('Checking dependencies...');
-      const dependencies = pluginInstance.getDependencies();
+      const dependencies = agentInstance.getDependencies();
       console.log('[PluginConfigEditor] Required dependencies:', dependencies);
 
       for (const dep of dependencies) {
@@ -84,29 +84,29 @@ export const PluginConfigEditor: React.FC<PluginConfigEditorProps> = ({
         // Set dependency
         clientInstance.setCredentials(clientConfig.credentials);
         await clientInstance.initialize();
-        pluginInstance.setDependency(dep, clientInstance);
+        agentInstance.setDependency(dep, clientInstance);
         console.log(`[PluginConfigEditor] Dependency ${dep} resolved`);
       }
 
       // Initialize the plugin
-      setStatusMessage('Initializing plugin...');
-      console.log('[PluginConfigEditor] Initializing plugin...');
-      await pluginInstance.initialize();
+      setStatusMessage('Initializing agent...');
+      console.log('[PluginConfigEditor] Initializing agent...');
+      await agentInstance.initialize();
       console.log('[PluginConfigEditor] Plugin initialized successfully');
 
       // Save to chrome storage
       setStatusMessage('Saving configuration...');
       console.log('[PluginConfigEditor] Saving to chrome storage...');
       await chrome.storage.local.set({
-        [`plugin:${plugin.id}`]: {
-          pluginId: plugin.id,
+        [`agent:${agent.id}`]: {
+          agentId: agent.id,
           config,
           isActive: true,
           configuredAt: Date.now(),
         },
       });
 
-      console.log(`[${plugin.name}] Configuration saved and plugin initialized successfully`);
+      console.log(`[${agent.name}] Configuration saved and plugin initialized successfully`);
       setStatusMessage('Success!');
       setTimeout(() => onClose(), 500);
     } catch (err) {
@@ -124,17 +124,17 @@ export const PluginConfigEditor: React.FC<PluginConfigEditorProps> = ({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-[500px] max-h-[80vh] overflow-y-auto shadow-xl">
         <div className="flex items-center gap-3 mb-4">
-          {plugin.icon && <span className="text-3xl">{plugin.icon}</span>}
+          {agent.icon && <span className="text-3xl">{agent.icon}</span>}
           <div>
             <h2 className="text-xl font-bold text-gray-800">
-              Configure {plugin.name}
+              Configure {agent.name}
             </h2>
-            <p className="text-sm text-gray-500">v{plugin.version}</p>
+            <p className="text-sm text-gray-500">v{agent.version}</p>
           </div>
         </div>
 
         <p className="text-sm text-gray-600 mb-4">
-          {plugin.description}
+          {agent.description}
         </p>
 
         {/* Status Message */}
@@ -223,9 +223,9 @@ export const PluginConfigEditor: React.FC<PluginConfigEditorProps> = ({
         <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
           <p className="font-medium mb-1">About this plugin:</p>
           <ul className="space-y-1 ml-4 list-disc">
-            <li>{pluginInstance.getCapabilities().length} capabilities available</li>
-            {pluginInstance.getDependencies().length > 0 && (
-              <li>Requires: {pluginInstance.getDependencies().join(', ')}</li>
+            <li>{agentInstance.getCapabilities().length} capabilities available</li>
+            {agentInstance.getDependencies().length > 0 && (
+              <li>Requires: {agentInstance.getDependencies().join(', ')}</li>
             )}
             <li>Configuration stored securely in local storage</li>
             <li>Use from Chat by asking questions related to this plugin</li>

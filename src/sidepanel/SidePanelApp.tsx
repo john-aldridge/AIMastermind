@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '@/state/appStore';
 import { ChatView } from './components/ChatView';
-import { PluginsView } from './components/PluginsView';
+import { AgentsView } from './components/AgentsView';
 import { ClientsView } from './components/ClientsView';
 import { SettingsView } from './components/SettingsView';
 import { sendToBackground } from '@/utils/messaging';
@@ -9,9 +9,9 @@ import { MessageType } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
 import { networkMonitor } from '@/utils/networkMonitor';
 import { registerAllClients } from '@/clients';
-import { registerAllPlugins } from '@/plugins';
+import { registerAllAgents } from '@/agents';
 
-type View = 'chat' | 'plugins' | 'clients' | 'settings';
+type View = 'chat' | 'agents' | 'clients' | 'settings';
 
 export const SidePanelApp: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
@@ -19,9 +19,9 @@ export const SidePanelApp: React.FC = () => {
   const { plans, userConfig, updateUserConfig, chatMessages } = useAppStore();
 
   useEffect(() => {
-    // Register all built-in clients and plugins
+    // Register all built-in clients and agents
     registerAllClients();
-    registerAllPlugins();
+    registerAllAgents();
 
     // Auto-configure BrowserClient (no credentials needed)
     autoConfigureBrowserClient();
@@ -110,7 +110,7 @@ export const SidePanelApp: React.FC = () => {
   }, [plans, userConfig, chatMessages]);
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50 min-w-[400px] max-w-[600px]">
+    <div className="h-screen w-full flex flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white p-3 shadow-lg flex-shrink-0">
         {/* Navigation */}
@@ -126,14 +126,14 @@ export const SidePanelApp: React.FC = () => {
             Chat
           </button>
           <button
-            onClick={() => setCurrentView('plugins')}
+            onClick={() => setCurrentView('agents')}
             className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-              currentView === 'plugins'
+              currentView === 'agents'
                 ? 'bg-white text-primary-700'
                 : 'bg-primary-500 hover:bg-primary-400 text-white'
             }`}
           >
-            Plugins
+            Agents
           </button>
           <button
             onClick={() => setCurrentView('clients')}
@@ -162,11 +162,7 @@ export const SidePanelApp: React.FC = () => {
       {/* Content - Scrollable */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {currentView === 'chat' && <ChatView />}
-        {currentView === 'plugins' && (
-          <div className="overflow-auto flex-1">
-            <PluginsView />
-          </div>
-        )}
+        {currentView === 'agents' && <AgentsView />}
         {currentView === 'clients' && (
           <div className="overflow-auto flex-1">
             <ClientsView />

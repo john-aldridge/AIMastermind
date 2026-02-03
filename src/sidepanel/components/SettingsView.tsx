@@ -4,10 +4,11 @@ import { ProviderSelector } from './ProviderSelector';
 import { DynamicAuthForm } from './DynamicAuthForm';
 import { ConfigurationManager } from './ConfigurationManager';
 import { NetworkSettings } from './NetworkSettings';
+import { AutoLoadRulesView } from './AutoLoadRulesView';
 import { ProviderConfig, getProviderById } from '@/utils/providers';
 
 type NotificationType = 'success' | 'error' | null;
-type SettingsSection = 'main' | 'models' | 'network' | 'billing' | 'cloud-sync';
+type SettingsSection = 'main' | 'models' | 'network' | 'auto-load' | 'billing' | 'cloud-sync';
 
 export const SettingsView: React.FC = () => {
   const { userConfig, updateUserConfig, addConfiguration } = useAppStore();
@@ -219,6 +220,24 @@ export const SettingsView: React.FC = () => {
             <div className="text-left">
               <div className="font-medium text-gray-800">Network Monitoring</div>
               <div className="text-xs text-gray-500">Control network access levels</div>
+            </div>
+          </div>
+          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('auto-load')}
+          className="w-full px-4 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors border-b border-gray-200"
+        >
+          <div className="flex items-center gap-3">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <div className="text-left">
+              <div className="font-medium text-gray-800">Auto-Load Rules</div>
+              <div className="text-xs text-gray-500">Auto-activate agents on specific URLs</div>
             </div>
           </div>
           <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -534,6 +553,7 @@ export const SettingsView: React.FC = () => {
           {activeSection === 'main' && 'Settings'}
           {activeSection === 'models' && 'Models'}
           {activeSection === 'network' && 'Network Monitoring'}
+          {activeSection === 'auto-load' && 'Auto-Load Rules'}
           {activeSection === 'billing' && 'Billing'}
           {activeSection === 'cloud-sync' && 'Cloud Sync'}
         </h2>
@@ -543,6 +563,7 @@ export const SettingsView: React.FC = () => {
       {activeSection === 'main' && renderMainMenu()}
       {activeSection === 'models' && renderModelsSettings()}
       {activeSection === 'network' && renderNetworkSettings()}
+      {activeSection === 'auto-load' && <AutoLoadRulesView />}
       {activeSection === 'billing' && renderBillingSettings()}
       {activeSection === 'cloud-sync' && renderCloudSyncSettings()}
     </div>

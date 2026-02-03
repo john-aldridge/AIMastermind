@@ -2,6 +2,8 @@ import { Message, MessageType, MessageResponse } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
 import { chromeStorageService } from '@/storage/chromeStorage';
 import { networkMonitor } from '@/utils/networkMonitor';
+import { AutoLoadRuleStorageService } from '@/storage/autoLoadRuleStorage';
+import type { AutoLoadRule } from '@/types/autoLoadRule';
 
 console.log('Synergy AI background script loaded');
 
@@ -32,6 +34,190 @@ async function initializeAPIService() {
 
 // Initialize on startup
 initializeAPIService();
+
+// Track active agents per tab
+const activeAgentsPerTab = new Map<number, Set<string>>();
+
+// Track page load history per tab (to detect reloads)
+interface TabLoadHistory {
+  url: string;
+  loadCount: number;
+  lastLoadTime: number;
+  executedRules: Set<string>; // Rule IDs that have been executed
+}
+const tabLoadHistory = new Map<number, TabLoadHistory>();
+
+/**
+ * Check and activate auto-load rules for a given URL
+ */
+async function checkAndActivateAutoLoadRules(tabId: number, url: string) {
+  try {
+    // Get matching rules for this URL
+    const matchingRules = await AutoLoadRuleStorageService.getMatchingRules(url);
+
+    if (matchingRules.length === 0) {
+      // Clear any previously active agents for this tab
+      activeAgentsPerTab.delete(tabId);
+      tabLoadHistory.delete(tabId);
+      return;
+    }
+
+    // Track load history for reload detection
+    let history = tabLoadHistory.get(tabId);
+    const isReload = history && history.url === url;
+
+    if (!history || history.url !== url) {
+      // New URL or first load
+      history = {
+        url,
+        loadCount: 1,
+        lastLoadTime: Date.now(),
+        executedRules: new Set<string>()
+      };
+      tabLoadHistory.set(tabId, history);
+    } else {
+      // Same URL - this is a reload
+      history.loadCount++;
+      history.lastLoadTime = Date.now();
+    }
+
+    // Get or create the set of active agents for this tab
+    let activeAgents = activeAgentsPerTab.get(tabId);
+    if (!activeAgents) {
+      activeAgents = new Set<string>();
+      activeAgentsPerTab.set(tabId, activeAgents);
+    }
+
+    // Track newly activated agents
+    const newlyActivated: AutoLoadRule[] = [];
+
+    // Activate each matching rule's agent
+    for (const rule of matchingRules) {
+      const isFirstLoad = !activeAgents.has(rule.agentId);
+      const shouldExecute =
+        (isFirstLoad && rule.executeOnLoad && rule.capabilityName) ||
+        (isReload && rule.watchForReloads && (rule.reloadCapabilityName || rule.capabilityName));
+
+      if (isFirstLoad) {
+        activeAgents.add(rule.agentId);
+        newlyActivated.push(rule);
+        console.log(`[Auto-Load] Activated agent "${rule.agentName}" for tab ${tabId} (matched: ${rule.urlPattern})`);
+      }
+
+      // Execute capability if configured
+      if (shouldExecute) {
+        try {
+          const capabilityToExecute = isReload
+            ? (rule.reloadCapabilityName || rule.capabilityName)
+            : rule.capabilityName;
+
+          console.log(
+            `[Auto-Load] ${isReload ? 'Re-executing on reload' : 'Executing'} capability "${capabilityToExecute}" for agent "${rule.agentName}"`
+          );
+
+          // Send message to content script or side panel to execute the capability
+          await chrome.tabs.sendMessage(tabId, {
+            type: 'EXECUTE_AGENT_CAPABILITY',
+            payload: {
+              agentId: rule.agentId,
+              capabilityName: capabilityToExecute,
+              parameters: rule.parameters || {},
+              isReload: isReload
+            }
+          }).catch(() => {
+            console.log(`[Auto-Load] Could not execute via content script, trying side panel...`);
+            // If content script isn't available, try side panel
+            chrome.runtime.sendMessage({
+              type: 'EXECUTE_AGENT_CAPABILITY',
+              payload: {
+                agentId: rule.agentId,
+                capabilityName: capabilityToExecute,
+                parameters: rule.parameters || {},
+                tabId: tabId,
+                isReload: isReload
+              }
+            }).catch(sideErr => {
+              console.error(`[Auto-Load] Failed to execute capability:`, sideErr);
+            });
+          });
+
+          // Track that this rule was executed
+          history.executedRules.add(rule.id);
+        } catch (error) {
+          console.error(`[Auto-Load] Error executing capability for agent "${rule.agentName}":`, error);
+        }
+      }
+    }
+
+    // Show notification if new agents were activated
+    if (newlyActivated.length > 0) {
+      const agentNames = newlyActivated.map(r => r.agentName).join(', ');
+      chrome.notifications.create(`auto-load-${tabId}-${Date.now()}`, {
+        type: 'basic',
+        iconUrl: 'icons/icon-128.png',
+        title: 'Agents Auto-Loaded',
+        message: `Activated: ${agentNames}`,
+        priority: 0,
+        requireInteraction: false
+      });
+
+      // Auto-dismiss after 3 seconds
+      setTimeout(() => {
+        chrome.notifications.clear(`auto-load-${tabId}-${Date.now()}`);
+      }, 3000);
+
+      // Send message to side panel to update UI
+      try {
+        await chrome.runtime.sendMessage({
+          type: 'AUTO_LOAD_ACTIVATED',
+          payload: {
+            tabId,
+            url,
+            rules: newlyActivated
+          }
+        });
+      } catch (error) {
+        // Side panel might not be open, that's okay
+        console.log('[Auto-Load] Side panel not available for notification');
+      }
+    }
+  } catch (error) {
+    console.error('[Auto-Load] Error checking rules:', error);
+  }
+}
+
+/**
+ * Monitor tab updates for auto-load rules
+ */
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Only check when the URL changes and is complete
+  if (changeInfo.status === 'complete' && tab.url) {
+    // Ignore chrome:// and other internal URLs
+    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) {
+      return;
+    }
+
+    console.log(`[Auto-Load] Tab ${tabId} updated to: ${tab.url}`);
+    checkAndActivateAutoLoadRules(tabId, tab.url);
+  }
+});
+
+/**
+ * Clean up when tabs are closed
+ */
+chrome.tabs.onRemoved.addListener((tabId) => {
+  activeAgentsPerTab.delete(tabId);
+  tabLoadHistory.delete(tabId);
+  console.log(`[Auto-Load] Cleaned up agents and history for closed tab ${tabId}`);
+});
+
+/**
+ * Get active agents for a tab
+ */
+async function getActiveAgentsForTab(tabId: number): Promise<string[]> {
+  const activeAgents = activeAgentsPerTab.get(tabId);
+  return activeAgents ? Array.from(activeAgents) : [];
+}
 
 // Track recent downloads for analysis
 interface DownloadInfo {
@@ -212,6 +398,12 @@ async function handleMessage(
     case MessageType.GET_NETWORK_REQUESTS:
       return handleGetNetworkRequests(message.payload);
 
+    case MessageType.GET_ACTIVE_AGENTS:
+      return handleGetActiveAgents(message.payload);
+
+    case MessageType.CHECK_AUTO_LOAD_RULES:
+      return handleCheckAutoLoadRules(message.payload);
+
     default:
       return { success: false, error: 'Unknown message type' };
   }
@@ -333,6 +525,32 @@ async function handleGetNetworkRequests(payload: any): Promise<MessageResponse> 
     const { tabIds } = payload || {};
     const requests = networkMonitor.getRequests(tabIds);
     return { success: true, data: requests };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetActiveAgents(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const activeAgents = await getActiveAgentsForTab(tabId);
+    return { success: true, data: activeAgents };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleCheckAutoLoadRules(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId, url } = payload;
+    if (!tabId || !url) {
+      return { success: false, error: 'Tab ID and URL required' };
+    }
+    await checkAndActivateAutoLoadRules(tabId, url);
+    return { success: true };
   } catch (error) {
     return { success: false, error: String(error) };
   }

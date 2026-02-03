@@ -2,8 +2,13 @@ import { MasterPlan, UserConfig, ChatMessage } from '@/state/appStore';
 
 /**
  * Chrome storage API wrapper for extension data
- * Uses chrome.storage.sync for cross-device sync (100KB limit)
- * Falls back to chrome.storage.local for larger data
+ *
+ * SECURITY: User config (containing API keys) is stored in chrome.storage.local
+ * to prevent sensitive credentials from syncing across devices.
+ *
+ * Storage strategy:
+ * - chrome.storage.local: User config (API keys), plans, messages, active plan
+ * - chrome.storage.sync: Currently unused (reserved for non-sensitive preferences)
  */
 
 const STORAGE_KEYS = {
@@ -33,10 +38,11 @@ export const chromeStorageService = {
     }
   },
 
-  // User config
+  // User config - SECURITY: Store locally only (contains API keys)
   saveUserConfig: async (config: UserConfig): Promise<void> => {
     try {
-      await chrome.storage.sync.set({ [STORAGE_KEYS.USER_CONFIG]: config });
+      // Store in local storage for security (API keys should not sync)
+      await chrome.storage.local.set({ [STORAGE_KEYS.USER_CONFIG]: config });
     } catch (error) {
       console.error('Error saving user config to chrome.storage:', error);
     }
@@ -44,7 +50,8 @@ export const chromeStorageService = {
 
   loadUserConfig: async (): Promise<UserConfig | null> => {
     try {
-      const result = await chrome.storage.sync.get(STORAGE_KEYS.USER_CONFIG);
+      // Load from local storage (API keys are stored locally for security)
+      const result = await chrome.storage.local.get(STORAGE_KEYS.USER_CONFIG);
       return result[STORAGE_KEYS.USER_CONFIG] || null;
     } catch (error) {
       console.error('Error loading user config from chrome.storage:', error);

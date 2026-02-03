@@ -4,7 +4,7 @@ import { apiService, ToolDefinition } from '@/utils/api';
 import { MessageType } from '@/utils/messaging';
 import { FileAnalysis } from './FileAnalysis';
 import { ClientRegistry } from '@/clients';
-import { PluginRegistry } from '@/plugins';
+import { AgentRegistry } from '@/agents';
 
 interface TabContext {
   tabId: number;
@@ -195,26 +195,26 @@ export const ChatView: React.FC = () => {
       }
 
       // Load tools from plugins
-      const pluginIds = PluginRegistry.getAllIds();
-      console.log('[ChatView] Found registered plugins:', pluginIds);
+      const agentIds = AgentRegistry.getAllIds();
+      console.log('[ChatView] Found registered plugins:', agentIds);
 
-      for (const pluginId of pluginIds) {
+      for (const agentId of agentIds) {
         // Check if plugin is configured
-        const storageKey = `plugin:${pluginId}`;
+        const storageKey = `plugin:${agentId}`;
         const data = await chrome.storage.local.get(storageKey);
         const pluginConfig = data[storageKey];
 
         if (!pluginConfig?.config || !pluginConfig.isActive) {
-          console.log(`[ChatView] Plugin ${pluginId} not configured or not active, skipping`);
+          console.log(`[ChatView] Plugin ${agentId} not configured or not active, skipping`);
           continue;
         }
 
-        console.log(`[ChatView] Loading tools from plugin ${pluginId}...`);
+        console.log(`[ChatView] Loading tools from plugin ${agentId}...`);
 
         // Get plugin instance and load config
-        const pluginInstance = PluginRegistry.getInstance(pluginId);
+        const pluginInstance = AgentRegistry.getInstance(agentId);
         if (!pluginInstance) {
-          console.warn(`[ChatView] Could not get instance for ${pluginId}`);
+          console.warn(`[ChatView] Could not get instance for ${agentId}`);
           continue;
         }
 
@@ -239,7 +239,7 @@ export const ChatView: React.FC = () => {
 
         // Get capabilities and convert to tool definitions
         const capabilities = pluginInstance.getCapabilities();
-        console.log(`[ChatView] Plugin ${pluginId} has ${capabilities.length} capabilities`);
+        console.log(`[ChatView] Plugin ${agentId} has ${capabilities.length} capabilities`);
 
         for (const capability of capabilities) {
           const properties: Record<string, any> = {};
@@ -327,19 +327,19 @@ export const ChatView: React.FC = () => {
     }
 
     // Check plugins
-    const pluginIds = PluginRegistry.getAllIds();
-    for (const pluginId of pluginIds) {
-      const pluginInstance = PluginRegistry.getInstance(pluginId);
+    const agentIds = AgentRegistry.getAllIds();
+    for (const agentId of agentIds) {
+      const pluginInstance = AgentRegistry.getInstance(agentId);
       if (!pluginInstance) continue;
 
       const capabilities = pluginInstance.getCapabilities();
       const capability = capabilities.find(c => c.name === toolName);
 
       if (capability) {
-        console.log(`[ChatView] Tool ${toolName} belongs to plugin ${pluginId}`);
+        console.log(`[ChatView] Tool ${toolName} belongs to plugin ${agentId}`);
 
         // Load config from storage
-        const storageKey = `plugin:${pluginId}`;
+        const storageKey = `plugin:${agentId}`;
         const data = await chrome.storage.local.get(storageKey);
         const pluginConfig = data[storageKey];
 

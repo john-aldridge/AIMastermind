@@ -1,17 +1,17 @@
 /**
- * Capsule Wardrobe Plugin
+ * Capsule Wardrobe Agent
  *
  * Creates personalized capsule wardrobes based on Pinterest boards,
  * taking into account location/weather, Kibbe body type, and color season analysis.
  */
 
 import {
-  PluginBase,
-  PluginMetadata,
+  AgentBase,
+  AgentMetadata,
   ConfigField,
-  PluginCapabilityDefinition,
+  AgentCapabilityDefinition,
   CapabilityResult,
-} from './PluginInterface';
+} from './AgentInterface';
 
 // Kibbe body type recommendations
 const KIBBE_RECOMMENDATIONS = {
@@ -171,8 +171,8 @@ const COLOR_SEASONS = {
   },
 };
 
-export class CapsuleWardrobePlugin extends PluginBase {
-  getMetadata(): PluginMetadata {
+export class CapsuleWardrobeAgent extends AgentBase {
+  getMetadata(): AgentMetadata {
     return {
       id: 'capsule-wardrobe',
       name: 'Capsule Wardrobe Creator',
@@ -306,7 +306,7 @@ export class CapsuleWardrobePlugin extends PluginBase {
     return ['pinterest'];
   }
 
-  getCapabilities(): PluginCapabilityDefinition[] {
+  getCapabilities(): AgentCapabilityDefinition[] {
     return [
       {
         name: 'analyze_wardrobe_board',
