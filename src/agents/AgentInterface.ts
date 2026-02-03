@@ -5,6 +5,8 @@
  * Unlike clients, agents don't require authentication - they use configured clients as dependencies.
  */
 
+import type { ProcessType } from '@/types/processRegistry';
+
 export interface AgentMetadata {
   id: string;
   name: string;
@@ -37,6 +39,12 @@ export interface AgentCapabilityDefinition {
     required: boolean;
     default?: any;
   }>;
+  /**
+   * Optional: Indicates if this capability starts long-running processes
+   * that should be tracked in the process registry.
+   * When true, agents should use registerProcess() to track cleanup functions.
+   */
+  isLongRunning?: boolean;
 }
 
 export interface CapabilityResult {
@@ -52,6 +60,7 @@ export interface CapabilityResult {
 export abstract class AgentBase {
   protected config: Record<string, any> = {};
   protected dependencies: Map<string, any> = new Map();
+  private activeProcesses: Set<string> = new Set(); // Track process IDs for cleanup
 
   /**
    * Get agent metadata (ID, name, description, etc.)
@@ -141,5 +150,134 @@ export abstract class AgentBase {
   hasDependencies(): boolean {
     const required = this.getDependencies();
     return required.every(dep => this.dependencies.has(dep));
+  }
+
+  /**
+   * Register a long-running process for cleanup tracking
+   *
+   * @example
+   * // Register a MutationObserver
+   * const observer = new MutationObserver((mutations) => { ... });
+   * observer.observe(document.body, { childList: true, subtree: true });
+   * this.registerProcess('watch_dom', {
+   *   type: 'mutation-observer',
+   *   cleanup: () => observer.disconnect(),
+   *   metadata: { target: 'document.body', description: 'Watch for DOM changes' }
+   * });
+   *
+   * @example
+   * // Register a setInterval
+   * const intervalId = setInterval(() => { ... }, 1000);
+   * this.registerProcess('poll_status', {
+   *   type: 'interval',
+   *   cleanup: () => clearInterval(intervalId),
+   *   metadata: { interval: 1000, description: 'Poll status every second' }
+   * });
+   */
+  protected registerProcess(
+    capabilityName: string,
+    process: {
+      type: ProcessType;
+      cleanup: () => void;
+      metadata?: Record<string, any>;
+    }
+  ): string | null {
+    if (typeof window === 'undefined' || !window.__agentProcessRegistry) {
+      console.warn('[AgentBase] Process registry not available');
+      return null;
+    }
+
+    const processId = window.__agentProcessRegistry.register(
+      this.getMetadata().id,
+      capabilityName,
+      process
+    );
+
+    this.activeProcesses.add(processId);
+    return processId;
+  }
+
+  /**
+   * Stop a specific process by ID
+   */
+  protected stopProcess(processId: string): boolean {
+    if (typeof window === 'undefined' || !window.__agentProcessRegistry) {
+      return false;
+    }
+
+    const stopped = window.__agentProcessRegistry.stop(processId);
+    if (stopped) {
+      this.activeProcesses.delete(processId);
+    }
+    return stopped;
+  }
+
+  /**
+   * Stop all processes for a specific capability
+   */
+  protected stopCapabilityProcesses(capabilityName: string): number {
+    if (typeof window === 'undefined' || !window.__agentProcessRegistry) {
+      return 0;
+    }
+
+    const stopped = window.__agentProcessRegistry.stopCapability(
+      this.getMetadata().id,
+      capabilityName
+    );
+
+    // Rebuild active processes set
+    const remaining = window.__agentProcessRegistry.getByAgent(this.getMetadata().id);
+    this.activeProcesses = new Set(remaining.map(proc => proc.id));
+
+    return stopped;
+  }
+
+  /**
+   * Stop all processes started by this agent
+   */
+  protected stopAllProcesses(): number {
+    if (typeof window === 'undefined' || !window.__agentProcessRegistry) {
+      return 0;
+    }
+
+    const stopped = window.__agentProcessRegistry.stopAgent(this.getMetadata().id);
+    this.activeProcesses.clear();
+    return stopped;
+  }
+
+  /**
+   * Check if a specific process is still active
+   */
+  protected isProcessActive(processId: string): boolean {
+    if (typeof window === 'undefined' || !window.__agentProcessRegistry) {
+      return false;
+    }
+
+    return window.__agentProcessRegistry.has(processId);
+  }
+
+  /**
+   * Get all active processes for this agent
+   */
+  protected getActiveProcesses() {
+    if (typeof window === 'undefined' || !window.__agentProcessRegistry) {
+      return [];
+    }
+
+    return window.__agentProcessRegistry.getByAgent(this.getMetadata().id);
+  }
+
+  /**
+   * Get active processes for a specific capability
+   */
+  protected getCapabilityProcesses(capabilityName: string) {
+    if (typeof window === 'undefined' || !window.__agentProcessRegistry) {
+      return [];
+    }
+
+    return window.__agentProcessRegistry.getByCapability(
+      this.getMetadata().id,
+      capabilityName
+    );
   }
 }

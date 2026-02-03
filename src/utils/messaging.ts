@@ -38,6 +38,12 @@ export enum MessageType {
   // Auto-load rules
   GET_ACTIVE_AGENTS = 'GET_ACTIVE_AGENTS',
   CHECK_AUTO_LOAD_RULES = 'CHECK_AUTO_LOAD_RULES',
+
+  // Process registry
+  LIST_PROCESSES = 'LIST_PROCESSES',
+  STOP_PROCESS = 'STOP_PROCESS',
+  STOP_AGENT_PROCESSES = 'STOP_AGENT_PROCESSES',
+  STOP_ALL_PROCESSES = 'STOP_ALL_PROCESSES',
 }
 
 export interface Message<T = any> {

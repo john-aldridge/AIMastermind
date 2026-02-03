@@ -3,8 +3,9 @@ import { MonacoEditor } from '../sidepanel/components/MonacoEditor';
 import { VersionManager } from '../sidepanel/components/VersionManager';
 import { EditorChatPanel } from '../sidepanel/components/EditorChatPanel';
 import { ResizablePanel } from './ResizablePanel';
-import { ResourcesPane } from './components/ResourcesPane';
+import { ResourcesPane, ResourceType } from './components/ResourcesPane';
 import { MarkdownPreview } from './components/MarkdownPreview';
+import { getExampleAgent } from '../templates/exampleAgents';
 import { AgentSourceStorageService } from '../storage/agentSourceStorage';
 import { AgentLoader } from '../services/agentLoader';
 import { AgentCompiler } from '../services/agentCompiler';
@@ -33,7 +34,7 @@ export const EditorApp: React.FC = () => {
   const [saveDescription, setSaveDescription] = useState('');
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [versionBump, setVersionBump] = useState<'none' | 'patch' | 'minor' | 'major'>('none');
-  const [selectedResource, setSelectedResource] = useState<'agent-code' | 'readme'>('agent-code');
+  const [selectedResource, setSelectedResource] = useState<ResourceType>('agent-code');
   const [editorMode, setEditorMode] = useState<'details' | 'preview'>('details');
   const [readmeContent, setReadmeContent] = useState<string>('');
   const [originalReadme, setOriginalReadme] = useState<string>('');
@@ -219,6 +220,10 @@ export const EditorApp: React.FC = () => {
   };
 
   const handleSave = () => {
+    if (isViewingExample) {
+      showNotification('error', 'Cannot save changes to example files. Copy the code to your agent instead.');
+      return;
+    }
     setShowSaveModal(true);
     setSaveDescription('');
   };
@@ -307,6 +312,38 @@ export const EditorApp: React.FC = () => {
     window.close();
   };
 
+  const handleResourceSelect = (resource: ResourceType) => {
+    setSelectedResource(resource);
+
+    // If it's an example resource, load the example content
+    if (resource.startsWith('example-')) {
+      const match = resource.match(/^example-(.+)-(code|readme)$/);
+      if (match) {
+        const [, exampleId, fileType] = match;
+        const example = getExampleAgent(exampleId);
+
+        if (example) {
+          if (fileType === 'code') {
+            setCode(example.code);
+            setOriginalCode(example.code);
+          } else if (fileType === 'readme') {
+            setReadmeContent(example.readme);
+            setOriginalReadme(example.readme);
+          }
+          // Force details mode for viewing examples
+          setEditorMode('details');
+        }
+      }
+    } else {
+      // Reload the user's agent files
+      if (agentId) {
+        loadPlugin(agentId);
+      }
+    }
+  };
+
+  const isViewingExample = selectedResource.startsWith('example-');
+
   if (!agentId) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-50">
@@ -373,8 +410,9 @@ export const EditorApp: React.FC = () => {
 
             <button
               onClick={handleSave}
-              disabled={isSaving}
+              disabled={isSaving || isViewingExample}
               className="px-4 py-2 bg-white text-primary-700 rounded-lg hover:bg-primary-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              title={isViewingExample ? 'Cannot save example files' : 'Save changes'}
             >
               {isSaving ? 'Saving...' : 'Save'}
             </button>
@@ -399,7 +437,7 @@ export const EditorApp: React.FC = () => {
             {/* Resources Pane */}
             <ResourcesPane
               selectedResource={selectedResource}
-              onResourceSelect={setSelectedResource}
+              onResourceSelect={handleResourceSelect}
               isCollapsed={isResourcesPaneCollapsed}
               onToggleCollapse={() => setIsResourcesPaneCollapsed(!isResourcesPaneCollapsed)}
             />
@@ -408,7 +446,20 @@ export const EditorApp: React.FC = () => {
             <div className="flex-1 flex flex-col">
               <div className="bg-gray-100 px-4 py-2 border-b border-gray-200 text-sm font-medium text-gray-700 flex-shrink-0 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span>{selectedResource === 'agent-code' ? 'Agent Code' : 'README'}</span>
+                  <span>
+                    {selectedResource === 'agent-code'
+                      ? 'Agent Code'
+                      : selectedResource === 'readme'
+                      ? 'README'
+                      : selectedResource.includes('code')
+                      ? 'Example Code'
+                      : 'Example README'}
+                  </span>
+                  {isViewingExample && (
+                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
+                      Read-only
+                    </span>
+                  )}
                   <div className="flex gap-1 ml-4">
                     <button
                       onClick={() => setEditorMode('details')}
@@ -453,18 +504,24 @@ export const EditorApp: React.FC = () => {
               </div>
               <div className="flex-1 overflow-hidden">
                 {editorMode === 'details' ? (
-                  selectedResource === 'agent-code' ? (
-                    <MonacoEditor value={code} onChange={handleCodeChange} theme="vs-dark" />
+                  selectedResource === 'agent-code' || selectedResource.includes('code') ? (
+                    <MonacoEditor
+                      value={code}
+                      onChange={isViewingExample ? () => {} : handleCodeChange}
+                      theme="vs-dark"
+                      readOnly={isViewingExample}
+                    />
                   ) : (
                     <textarea
                       value={readmeContent}
-                      onChange={(e) => setReadmeContent(e.target.value)}
-                      className="w-full h-full p-4 font-mono text-sm resize-none focus:outline-none border-0"
-                      placeholder="Edit your README here..."
+                      onChange={(e) => !isViewingExample && setReadmeContent(e.target.value)}
+                      className="w-full h-full p-4 font-mono text-sm resize-none focus:outline-none border-0 bg-[#1e1e1e] text-[#d4d4d4]"
+                      placeholder={isViewingExample ? '' : 'Edit your README here...'}
+                      readOnly={isViewingExample}
                     />
                   )
                 ) : (
-                  selectedResource === 'agent-code' ? (
+                  selectedResource === 'agent-code' || selectedResource.includes('code') ? (
                     <div className="h-full flex items-center justify-center bg-gray-50 text-gray-500">
                       No Preview Available
                     </div>

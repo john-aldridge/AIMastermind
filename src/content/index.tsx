@@ -4,6 +4,7 @@ import '@/styles/globals.css';
 import { MessageType } from '@/utils/messaging';
 import { javascriptExtractor } from './javascriptExtractor';
 import { cssExtractor } from './cssExtractor';
+import { initializeProcessRegistry, getProcessRegistry } from '@/utils/processRegistry';
 
 // Inject network interceptor into page context
 const injectInterceptor = () => {
@@ -114,6 +115,57 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // Return true to indicate async response
       return true;
     }
+
+    // Process Registry handlers
+    if (message.type === MessageType.LIST_PROCESSES) {
+      const registry = getProcessRegistry();
+      if (!registry) {
+        sendResponse({ success: false, error: 'Process registry not initialized' });
+        return false;
+      }
+
+      const processes = registry.list();
+      sendResponse({ success: true, data: processes });
+      return false;
+    }
+
+    if (message.type === MessageType.STOP_PROCESS) {
+      const registry = getProcessRegistry();
+      if (!registry) {
+        sendResponse({ success: false, error: 'Process registry not initialized' });
+        return false;
+      }
+
+      const { processId } = message.payload;
+      const stopped = registry.stop(processId);
+      sendResponse({ success: stopped, data: { stopped } });
+      return false;
+    }
+
+    if (message.type === MessageType.STOP_AGENT_PROCESSES) {
+      const registry = getProcessRegistry();
+      if (!registry) {
+        sendResponse({ success: false, error: 'Process registry not initialized' });
+        return false;
+      }
+
+      const { agentId } = message.payload;
+      const stoppedCount = registry.stopAgent(agentId);
+      sendResponse({ success: true, data: { stoppedCount } });
+      return false;
+    }
+
+    if (message.type === MessageType.STOP_ALL_PROCESSES) {
+      const registry = getProcessRegistry();
+      if (!registry) {
+        sendResponse({ success: false, error: 'Process registry not initialized' });
+        return false;
+      }
+
+      const stoppedCount = registry.stopAll();
+      sendResponse({ success: true, data: { stoppedCount } });
+      return false;
+    }
   } catch (error) {
     // Suppress context invalidation errors
     if (error instanceof Error && error.message.includes('Extension context invalidated')) {
@@ -151,6 +203,9 @@ const initializeContentScript = () => {
   }
 
   console.log('%c[Synergy AI] Content script initializing...', 'background: #9C27B0; color: white; padding: 2px 5px; border-radius: 3px;');
+
+  // Initialize process registry for tracking long-running agent processes
+  initializeProcessRegistry();
 
   // Inject network interceptor first
   injectInterceptor();
