@@ -17,7 +17,9 @@
       "mcp__chrome-devtools__list_pages",
       "mcp__chrome-devtools__list_console_messages",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:developer.atlassian.com)"
+      "WebFetch(domain:developer.atlassian.com)",
+      "Bash(grep:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

@@ -303,6 +303,59 @@ export const EditorApp: React.FC = () => {
     setTimeout(() => setNotification(null), 5000);
   };
 
+  const handleDownload = () => {
+    if (!agentId || !pluginName) return;
+
+    // Create downloadable files
+    const downloadFile = (content: string, filename: string, mimeType: string) => {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+
+    // Download code file
+    const codeFilename = `${agentId}.ts`;
+    downloadFile(code, codeFilename, 'text/typescript');
+
+    // Download README file if it has content
+    if (readmeContent.trim()) {
+      setTimeout(() => {
+        const readmeFilename = `${agentId}-README.md`;
+        downloadFile(readmeContent, readmeFilename, 'text/markdown');
+      }, 100); // Small delay to avoid browser blocking multiple downloads
+    }
+
+    showNotification('success', 'Agent files downloaded successfully');
+  };
+
+  const handleDelete = async () => {
+    if (!agentId) return;
+
+    const confirmMessage = `Are you sure you want to delete "${pluginName}"?\n\nThis will permanently delete all versions of this agent.\nThis action cannot be undone.`;
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      await AgentSourceStorageService.deleteAgentSource(agentId);
+      showNotification('success', `Agent "${pluginName}" deleted successfully`);
+
+      // Close the editor window after a brief delay
+      setTimeout(() => {
+        window.close();
+      }, 1500);
+    } catch (error) {
+      showNotification('error', 'Failed to delete agent: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
   const handleClose = () => {
     if (hasUnsavedChanges) {
       if (!confirm('You have unsaved changes. Close anyway?')) {
@@ -406,6 +459,30 @@ export const EditorApp: React.FC = () => {
               className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors flex items-center gap-2 font-medium"
             >
               Done
+            </button>
+
+            <button
+              onClick={handleDownload}
+              disabled={isViewingExample}
+              className="px-4 py-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+              title={isViewingExample ? 'Cannot download example files' : 'Download agent files'}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download
+            </button>
+
+            <button
+              onClick={handleDelete}
+              disabled={isViewingExample}
+              className="px-4 py-2 bg-red-500/90 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+              title={isViewingExample ? 'Cannot delete example files' : 'Delete this agent'}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete
             </button>
 
             <button
