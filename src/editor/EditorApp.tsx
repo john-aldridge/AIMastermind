@@ -230,10 +230,6 @@ export const EditorApp: React.FC = () => {
 
   const confirmSave = async () => {
     if (!agentId) return;
-    if (!saveDescription.trim()) {
-      alert('Please enter a description for this version');
-      return;
-    }
 
     setIsSaving(true);
 
@@ -671,12 +667,12 @@ export const EditorApp: React.FC = () => {
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Description <span className="text-red-500">*</span>
+                Description <span className="text-gray-400 text-xs">(optional)</span>
               </label>
               <textarea
                 value={saveDescription}
                 onChange={(e) => setSaveDescription(e.target.value)}
-                placeholder="What changed in this version?"
+                placeholder="What changed in this version? (optional)"
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 autoFocus
@@ -692,7 +688,7 @@ export const EditorApp: React.FC = () => {
               </button>
               <button
                 onClick={confirmSave}
-                disabled={isSaving || !saveDescription.trim()}
+                disabled={isSaving}
                 className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
               >
                 {isSaving ? 'Saving...' : 'Save'}

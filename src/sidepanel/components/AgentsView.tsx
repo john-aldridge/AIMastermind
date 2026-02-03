@@ -19,6 +19,25 @@ export const AgentsView: React.FC = () => {
 
   useEffect(() => {
     loadAgents();
+
+    // Listen for storage changes to automatically refresh the list
+    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      if (areaName === 'local') {
+        // Check if any agent-related keys changed
+        const agentKeys = Object.keys(changes).filter(key => key.startsWith('agent:source:'));
+        if (agentKeys.length > 0) {
+          console.log('[AgentsView] Storage changed, reloading agents:', agentKeys);
+          loadAgents();
+        }
+      }
+    };
+
+    chrome.storage.onChanged.addListener(handleStorageChange);
+
+    // Cleanup listener on unmount
+    return () => {
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+    };
   }, []);
 
   const loadAgents = async () => {
