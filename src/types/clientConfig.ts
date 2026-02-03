@@ -5,7 +5,7 @@
  * executed by the client engine in extension context.
  */
 
-import { CredentialField } from './agentTypes';
+import type { CredentialField } from '../clients/ClientInterface';
 
 /**
  * Top-level client configuration

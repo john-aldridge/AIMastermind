@@ -5,7 +5,7 @@
  * executed by the agent engine in extension context.
  */
 
-import { ConfigField } from './agentTypes';
+import type { ConfigField } from '../agents/AgentInterface';
 
 /**
  * Top-level agent configuration

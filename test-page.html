@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Overlay Test Page - Config Agent Testing</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            line-height: 1.6;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .content {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .test-section {
+            background: #f5f5f5;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .test-button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+
+        .test-button:hover {
+            background: #0052a3;
+        }
+
+        /* Overlay 1: Modal Overlay (Classic) */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            max-width: 500px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+
+        .modal-close {
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #666;
+        }
+
+        /* Overlay 2: Paywall Style */
+        .paywall-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.98);
+            z-index: 8888;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .paywall-content {
+            text-align: center;
+            max-width: 600px;
+            padding: 40px;
+        }
+
+        /* Overlay 3: Cookie Consent Banner */
+        .cookie-banner {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: #2c2c2c;
+            color: white;
+            padding: 20px;
+            z-index: 7777;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
+        }
+
+        /* Overlay 4: Popup Ad */
+        .popup-ad {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border: 3px solid #ff6600;
+            border-radius: 8px;
+            padding: 30px;
+            z-index: 10000;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            max-width: 400px;
+        }
+
+        /* Price display for testing price extractor */
+        .product-price {
+            font-size: 32px;
+            font-weight: bold;
+            color: #e63946;
+            margin: 20px 0;
+        }
+
+        .original-price {
+            text-decoration: line-through;
+            color: #999;
+            font-size: 24px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <h1>🧪 Config-Based Agent Test Page</h1>
+
+        <div class="test-section">
+            <h2>Test Instructions</h2>
+            <p>This page contains multiple overlays to test the <strong>OverlayRemoverAgent</strong> config-based agent.</p>
+
+            <h3>Active Overlays on This Page:</h3>
+            <ul>
+                <li>✅ Modal Overlay (z-index: 9999)</li>
+                <li>✅ Paywall Overlay (z-index: 8888)</li>
+                <li>✅ Cookie Banner (z-index: 7777)</li>
+                <li>✅ Popup Ad (z-index: 10000)</li>
+            </ul>
+
+            <h3>How to Test:</h3>
+            <ol>
+                <li>Load the Synergy AI extension</li>
+                <li>Open the sidepanel (click extension icon)</li>
+                <li>Go to <strong>Agents</strong> tab</li>
+                <li>Find <strong>"🚫 Overlay Remover"</strong> in the list</li>
+                <li>Click the <strong>Execute ▶️</strong> button</li>
+                <li>All overlays should disappear!</li>
+            </ol>
+
+            <h3>Manual Overlay Controls:</h3>
+            <button class="test-button" onclick="showAllOverlays()">Show All Overlays</button>
+            <button class="test-button" onclick="hideAllOverlays()">Hide All Overlays</button>
+        </div>
+
+        <div class="test-section">
+            <h2>Price Extractor Test</h2>
+            <p>Test the <strong>PriceExtractorAgent</strong> (requires JavaScript execution enabled):</p>
+
+            <div>
+                <h3>Product: Amazing Widget</h3>
+                <div>
+                    <span class="original-price">$149.99</span>
+                    <span class="product-price">$99.99</span>
+                </div>
+                <p>This price should be extracted: <strong>$99.99</strong></p>
+            </div>
+
+            <p><strong>Note:</strong> You must enable JavaScript execution in Settings → Security before running this agent.</p>
+        </div>
+
+        <div class="test-section">
+            <h2>Expected Behavior</h2>
+
+            <h3>OverlayRemoverAgent (Declarative):</h3>
+            <ul>
+                <li>Should remove all 4 overlays</li>
+                <li>Should restore body scroll</li>
+                <li>Should show success notification</li>
+                <li><strong>No JavaScript settings required</strong></li>
+            </ul>
+
+            <h3>PriceExtractorAgent (JavaScript):</h3>
+            <ul>
+                <li>Should extract $99.99 from the price display</li>
+                <li>Should show price found notification</li>
+                <li><strong>Requires JavaScript enabled in Settings</strong></li>
+                <li>Should show JS review dialog on first run (if enabled)</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h2>Page Content</h2>
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. This is the actual page content that should remain visible after overlays are removed.</p>
+            <p>The overlays are currently blocking this content, making it hard to read. Once you execute the OverlayRemoverAgent, you should be able to read this clearly.</p>
+            <p>This demonstrates the practical use case of the config-based agent architecture: removing annoying popups and overlays that interfere with the user experience.</p>
+        </div>
+    </div>
+
+    <!-- Overlay 1: Modal -->
+    <div class="modal-overlay" id="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="document.getElementById('modal').remove()">&times;</span>
+            <h2>📢 Subscribe to Our Newsletter!</h2>
+            <p>Get exclusive updates and special offers.</p>
+            <input type="email" placeholder="Enter your email" style="width: 100%; padding: 10px; margin: 10px 0;">
+            <button class="test-button" style="width: 100%;">Subscribe Now</button>
+        </div>
+    </div>
+
+    <!-- Overlay 2: Paywall -->
+    <div class="paywall-overlay" id="paywall">
+        <div class="paywall-content">
+            <h2>🔒 Premium Content</h2>
+            <p>You've reached your free article limit.</p>
+            <p>Subscribe to continue reading unlimited articles.</p>
+            <button class="test-button">Subscribe for $9.99/month</button>
+            <p style="margin-top: 20px;">
+                <small><a href="#" onclick="document.getElementById('paywall').remove(); return false;">Maybe later</a></small>
+            </p>
+        </div>
+    </div>
+
+    <!-- Overlay 3: Cookie Banner -->
+    <div class="cookie-banner" id="cookies">
+        <div style="max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between;">
+            <div style="flex: 1;">
+                <strong>🍪 We use cookies</strong>
+                <p style="margin: 5px 0 0 0; font-size: 14px;">
+                    We use cookies to improve your experience. By continuing, you accept our use of cookies.
+                </p>
+            </div>
+            <div>
+                <button class="test-button" onclick="document.getElementById('cookies').remove()">Accept All</button>
+                <button class="test-button" style="background: transparent; border: 2px solid white;">Customize</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay 4: Popup Ad -->
+    <div class="popup-ad" id="popup">
+        <span class="modal-close" onclick="document.getElementById('popup').remove()">&times;</span>
+        <h2>🎁 Special Offer!</h2>
+        <p><strong>50% OFF</strong> - Limited Time Only</p>
+        <p>Don't miss out on this amazing deal!</p>
+        <button class="test-button" style="width: 100%; background: #ff6600;">Claim Offer</button>
+    </div>
+
+    <script>
+        // Helper functions for manual testing
+        function showAllOverlays() {
+            const overlays = ['modal', 'paywall', 'cookies', 'popup'];
+            overlays.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'flex';
+            });
+        }
+
+        function hideAllOverlays() {
+            const overlays = ['modal', 'paywall', 'cookies', 'popup'];
+            overlays.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+        }
+
+        // Log to console that page is ready
+        console.log('✅ Test page loaded with 4 overlays ready for testing');
+        console.log('🚫 OverlayRemoverAgent should remove all visible overlays');
+        console.log('💰 PriceExtractorAgent should find: $99.99');
+    </script>
+</body>
+</html>

@@ -390,7 +390,7 @@ export class BrowserClient extends APIClientBase {
   static async executeInPageContext(
     script: string,
     args: any[] = [],
-    timeout: number = 5000
+    _timeout: number = 5000 // Reserved for future use
   ): Promise<any> {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tabs[0]?.id) {
@@ -399,19 +399,22 @@ export class BrowserClient extends APIClientBase {
 
     const tabId = tabs[0].id;
 
-    // Wrap script in a function that accepts arguments
-    const wrappedFunc = new Function('...args', `
-      return (async () => {
-        ${script}
-      })();
-    `);
-
     // Execute in MAIN world to bypass CSP and access page context
+    // We pass the script as a string and evaluate it in the page context
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
-      func: wrappedFunc,
-      args: args,
+      func: (...funcArgs: any[]) => {
+        // This function runs in page context
+        // funcArgs[0] is the script string, rest are the actual args
+        const scriptToRun = funcArgs[0];
+        const actualArgs = funcArgs.slice(1);
+
+        // Create a function from the script and execute it
+        const fn = new Function('...args', scriptToRun);
+        return fn(...actualArgs);
+      },
+      args: [script, ...args],
     });
 
     return results?.[0]?.result;

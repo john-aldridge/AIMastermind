@@ -12,7 +12,6 @@
 
 import {
   AgentConfig,
-  CapabilityConfig,
   CapabilityResult,
   Action,
   Condition,
@@ -28,17 +27,13 @@ import { ConfigRegistry } from './configRegistry';
  */
 class ExecutionContext {
   private variables: Map<string, any> = new Map();
-  private config: AgentConfig;
-  private parameters: Record<string, any>;
   private userConfig: Record<string, any>;
 
   constructor(
-    config: AgentConfig,
+    _config: AgentConfig,
     parameters: Record<string, any>,
     userConfig: Record<string, any>
   ) {
-    this.config = config;
-    this.parameters = parameters;
     this.userConfig = userConfig;
 
     // Initialize context with parameters

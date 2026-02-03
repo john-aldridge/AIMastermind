@@ -11,7 +11,6 @@ import {
   ClientConfig,
   ClientCapabilityConfig,
   ClientCapabilityResult,
-  RequestTransform,
   ResponseTransform,
   AuthConfig,
 } from '../types/clientConfig';
