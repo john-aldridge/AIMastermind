@@ -383,6 +383,40 @@ export class BrowserClient extends APIClientBase {
     return tabs[0].id;
   }
 
+  /**
+   * Execute JavaScript in page context (for agent engine)
+   * This is used by config-based agents to run JavaScript snippets
+   */
+  static async executeInPageContext(
+    script: string,
+    args: any[] = [],
+    timeout: number = 5000
+  ): Promise<any> {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]?.id) {
+      throw new Error('No active tab found');
+    }
+
+    const tabId = tabs[0].id;
+
+    // Wrap script in a function that accepts arguments
+    const wrappedFunc = new Function('...args', `
+      return (async () => {
+        ${script}
+      })();
+    `);
+
+    // Execute in MAIN world to bypass CSP and access page context
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: wrappedFunc,
+      args: args,
+    });
+
+    return results?.[0]?.result;
+  }
+
   private async executeJavaScript(params: any): Promise<any> {
     const { code } = params;
     const tabId = await this.getCurrentTabId();
