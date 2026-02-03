@@ -4,6 +4,7 @@ import { chromeStorageService } from '@/storage/chromeStorage';
 import { networkMonitor } from '@/utils/networkMonitor';
 import { AutoLoadRuleStorageService } from '@/storage/autoLoadRuleStorage';
 import type { AutoLoadRule } from '@/types/autoLoadRule';
+import { initializeConfigArchitecture } from '@/services/configInit';
 
 console.log('Synergy AI background script loaded');
 
@@ -34,6 +35,9 @@ async function initializeAPIService() {
 
 // Initialize on startup
 initializeAPIService();
+
+// Initialize config-based architecture
+initializeConfigArchitecture();
 
 // Track active agents per tab
 const activeAgentsPerTab = new Map<number, Set<string>>();
