@@ -12,10 +12,48 @@ import { ConfigRegistry } from '../services/configRegistry';
 import type { AgentConfig } from '../types/agentConfig';
 
 // Disable Monaco workers globally before any Monaco code runs
+// Use a proper stub worker that extends EventTarget to prevent errors
 if (typeof window !== 'undefined') {
+  // Create a stub worker that properly implements the Worker interface
+  class StubWorker extends EventTarget {
+    onmessage: ((this: Worker, ev: MessageEvent) => any) | null = null;
+    onerror: ((this: AbstractWorker, ev: ErrorEvent) => any) | null = null;
+    onmessageerror: ((this: Worker, ev: MessageEvent) => any) | null = null;
+
+    postMessage(_message: any, _transfer?: Transferable[]): void {
+      // Silently ignore all messages
+      // Monaco will try to send messages, but we do nothing
+    }
+
+    terminate(): void {
+      // No-op - nothing to terminate
+    }
+
+    // Satisfy TypeScript's Worker interface
+    addEventListener(
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions
+    ): void {
+      super.addEventListener(type, listener, options);
+    }
+
+    removeEventListener(
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | EventListenerOptions
+    ): void {
+      super.removeEventListener(type, listener, options);
+    }
+
+    dispatchEvent(event: Event): boolean {
+      return super.dispatchEvent(event);
+    }
+  }
+
   (window as any).MonacoEnvironment = {
     getWorker() {
-      return null;
+      return new StubWorker() as any;
     }
   };
 }

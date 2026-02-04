@@ -116,6 +116,7 @@ export type Action =
   | StorageSetAction
   | TabsCreateAction
   | NotifyAction
+  | TranslatePageAction
 
   // Process Management
   | StartProcessAction
@@ -278,6 +279,15 @@ export interface NotifyAction {
   type: 'notify';
   title: string;
   message: string;
+}
+
+export interface TranslatePageAction {
+  type: 'translatePage';
+  targetLanguage: string;              // ISO 639-1 language code (e.g., "en", "es", "fr")
+  sourceLanguage?: string;             // Optional: auto-detect if not specified
+  fallbackStrategy?: 'native-only' | 'llm-only' | 'google-only' |
+                     'native-then-llm' | 'native-then-google' |
+                     'llm-then-google' | 'native-then-llm-then-google'; // Default: 'native-then-llm'
 }
 
 // Process Management

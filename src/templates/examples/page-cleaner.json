@@ -1,0 +1,145 @@
+{
+  "id": "page-cleaner",
+  "name": "Page Cleaner & Translator",
+  "description": "Remove overlays, blur effects, restore scroll, and translate page to English",
+  "version": "1.0.0",
+  "author": "Synergy AI",
+  "icon": "✨",
+  "tags": ["dom-manipulation", "translation", "ux", "productivity"],
+  "containsJavaScript": true,
+  "requiresPageAccess": true,
+  "configFields": [
+    {
+      "key": "auto_translate",
+      "label": "Auto Translate",
+      "type": "select",
+      "required": true,
+      "default": "true",
+      "options": [
+        { "value": "true", "label": "Yes - Translate to English automatically" },
+        { "value": "false", "label": "No - Skip translation" }
+      ],
+      "helpText": "Automatically translate the page to English"
+    }
+  ],
+  "dependencies": [],
+  "capabilities": [
+    {
+      "name": "clean_and_translate",
+      "description": "Remove overlays, blur effects, enable scroll, and translate to English",
+      "parameters": [],
+      "trigger": {
+        "type": "manual"
+      },
+      "isLongRunning": false,
+      "actions": [
+        {
+          "type": "querySelectorAll",
+          "selector": ".modal, .popup, .overlay, .scrim, [class*='overlay'], [class*='modal'], [class*='popup'], [class*='scrim'], [role='dialog'], [aria-modal='true'], [style*='position: fixed'][style*='z-index']",
+          "saveAs": "overlays"
+        },
+        {
+          "type": "forEach",
+          "source": "overlays",
+          "itemAs": "overlay",
+          "do": [
+            {
+              "type": "remove",
+              "target": "overlay"
+            }
+          ]
+        },
+        {
+          "type": "querySelectorAll",
+          "selector": "[style*='filter'][style*='blur'], [style*='backdrop-filter'][style*='blur'], .blur, .blurred, [class*='blur']",
+          "saveAs": "blurredElements"
+        },
+        {
+          "type": "forEach",
+          "source": "blurredElements",
+          "itemAs": "element",
+          "do": [
+            {
+              "type": "addStyle",
+              "target": "element",
+              "styles": {
+                "filter": "none",
+                "backdrop-filter": "none",
+                "-webkit-filter": "none",
+                "-webkit-backdrop-filter": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "querySelectorAll",
+          "selector": "body",
+          "saveAs": "body"
+        },
+        {
+          "type": "forEach",
+          "source": "body",
+          "itemAs": "bodyEl",
+          "do": [
+            {
+              "type": "addStyle",
+              "target": "bodyEl",
+              "styles": {
+                "overflow": "auto !important",
+                "position": "static !important",
+                "height": "auto !important"
+              }
+            }
+          ]
+        },
+        {
+          "type": "querySelectorAll",
+          "selector": "html",
+          "saveAs": "html"
+        },
+        {
+          "type": "forEach",
+          "source": "html",
+          "itemAs": "htmlEl",
+          "do": [
+            {
+              "type": "addStyle",
+              "target": "htmlEl",
+              "styles": {
+                "overflow": "auto !important"
+              }
+            }
+          ]
+        },
+        {
+          "type": "if",
+          "condition": {
+            "type": "equals",
+            "left": "{{config.auto_translate}}",
+            "right": "true"
+          },
+          "then": [
+            {
+              "type": "translatePage",
+              "targetLanguage": "en",
+              "fallbackStrategy": "native-then-llm"
+            }
+          ]
+        },
+        {
+          "type": "notify",
+          "title": "Page Cleaned",
+          "message": "Removed {{overlays.length}} overlays, {{blurredElements.length}} blur effects, enabled scroll, and translated to English"
+        },
+        {
+          "type": "return",
+          "value": {
+            "success": true,
+            "overlaysRemoved": "{{overlays.length}}",
+            "blurEffectsRemoved": "{{blurredElements.length}}"
+          }
+        }
+      ]
+    }
+  ]
+}

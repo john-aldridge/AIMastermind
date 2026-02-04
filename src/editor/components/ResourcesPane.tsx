@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { EXAMPLE_AGENTS } from '@/templates/exampleAgents';
 
 export type ResourceType = 'agent-code' | 'readme' | `example-${string}-code` | `example-${string}-readme`;
@@ -17,6 +17,18 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
   onToggleCollapse,
 }) => {
   const [expandedExamples, setExpandedExamples] = useState<Set<string>>(new Set());
+  const [width, setWidth] = useState<number>(() => {
+    // Load saved width from localStorage
+    const saved = localStorage.getItem('resourcesPaneWidth');
+    return saved ? parseInt(saved, 10) : 224; // Default 224px (w-56)
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const paneRef = useRef<HTMLDivElement>(null);
+
+  // Save width to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('resourcesPaneWidth', width.toString());
+  }, [width]);
 
   const toggleExample = (exampleId: string) => {
     setExpandedExamples(prev => {
@@ -30,6 +42,42 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
     });
   };
 
+  // Handle resize dragging
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging || !paneRef.current) return;
+
+      const newWidth = e.clientX;
+
+      // Constrain between 150px (min) and 400px (max)
+      if (newWidth >= 150 && newWidth <= 400) {
+        setWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isDragging]);
+
+  const handleMouseDown = () => {
+    setIsDragging(true);
+  };
+
   const resources: { id: 'agent-code' | 'readme'; label: string; icon: string }[] = [
     { id: 'agent-code', label: 'Agent', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' },
     { id: 'readme', label: 'README', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
@@ -37,7 +85,7 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
 
   if (isCollapsed) {
     return (
-      <div className="w-12 bg-gray-50 border-r border-gray-200 flex flex-col items-center py-2">
+      <div className="bg-gray-50 border-r border-gray-200 flex flex-col items-center py-2" style={{ width: '48px', minWidth: '48px', maxWidth: '48px' }}>
         <button
           onClick={onToggleCollapse}
           className="p-2 hover:bg-gray-200 rounded transition-colors mb-2"
@@ -68,7 +116,11 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
   }
 
   return (
-    <div className="w-56 bg-gray-50 border-r border-gray-200 flex flex-col">
+    <div
+      ref={paneRef}
+      className="bg-gray-50 border-r border-gray-200 flex flex-col relative"
+      style={{ width: `${width}px`, minWidth: '150px', maxWidth: '400px' }}
+    >
       <div className="p-2 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
         <span className="text-xs font-semibold text-gray-700 uppercase">Resources</span>
         <button
@@ -196,6 +248,18 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
             );
           })}
         </div>
+      </div>
+
+      {/* Resize Handle */}
+      <div
+        onMouseDown={handleMouseDown}
+        className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary-500 transition-colors ${
+          isDragging ? 'bg-primary-500' : 'bg-transparent'
+        }`}
+        style={{ userSelect: 'none' }}
+        title="Drag to resize"
+      >
+        <div className="absolute inset-y-0 -left-1 -right-1" />
       </div>
     </div>
   );

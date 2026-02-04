@@ -1,0 +1,163 @@
+{
+  "id": "page-cleaner-advanced",
+  "name": "Page Cleaner & Translator (Advanced)",
+  "description": "Remove overlays, blur, enable scroll, translate with manual fallback control",
+  "version": "1.0.0",
+  "author": "Synergy AI",
+  "icon": "⚡",
+  "tags": ["dom-manipulation", "translation", "ux", "advanced", "manual-control"],
+  "containsJavaScript": false,
+  "requiresPageAccess": true,
+  "configFields": [],
+  "dependencies": [],
+  "capabilities": [
+    {
+      "name": "clean_and_translate_advanced",
+      "description": "Clean page and translate with explicit fallback control",
+      "parameters": [],
+      "trigger": {
+        "type": "manual"
+      },
+      "isLongRunning": false,
+      "actions": [
+        {
+          "type": "querySelectorAll",
+          "selector": ".modal, .popup, .overlay, .scrim, [class*='overlay'], [class*='modal'], [class*='popup'], [class*='scrim'], [role='dialog'], [aria-modal='true'], [style*='position: fixed'][style*='z-index']",
+          "saveAs": "overlays"
+        },
+        {
+          "type": "forEach",
+          "source": "overlays",
+          "itemAs": "overlay",
+          "do": [
+            {
+              "type": "remove",
+              "target": "overlay"
+            }
+          ]
+        },
+        {
+          "type": "querySelectorAll",
+          "selector": "[style*='filter'][style*='blur'], [style*='backdrop-filter'][style*='blur'], .blur, .blurred, [class*='blur']",
+          "saveAs": "blurredElements"
+        },
+        {
+          "type": "forEach",
+          "source": "blurredElements",
+          "itemAs": "element",
+          "do": [
+            {
+              "type": "addStyle",
+              "target": "element",
+              "styles": {
+                "filter": "none",
+                "backdrop-filter": "none",
+                "-webkit-filter": "none",
+                "-webkit-backdrop-filter": "none"
+              }
+            }
+          ]
+        },
+        {
+          "type": "querySelectorAll",
+          "selector": "body",
+          "saveAs": "body"
+        },
+        {
+          "type": "forEach",
+          "source": "body",
+          "itemAs": "bodyEl",
+          "do": [
+            {
+              "type": "addStyle",
+              "target": "bodyEl",
+              "styles": {
+                "overflow": "auto !important",
+                "position": "static !important",
+                "height": "auto !important"
+              }
+            }
+          ]
+        },
+        {
+          "type": "querySelectorAll",
+          "selector": "html",
+          "saveAs": "html"
+        },
+        {
+          "type": "forEach",
+          "source": "html",
+          "itemAs": "htmlEl",
+          "do": [
+            {
+              "type": "addStyle",
+              "target": "htmlEl",
+              "styles": {
+                "overflow": "auto !important"
+              }
+            }
+          ]
+        },
+        {
+          "type": "callClient",
+          "client": "browser",
+          "method": "browser_translate_page_native",
+          "params": {
+            "target_language": "en"
+          },
+          "saveAs": "nativeResult"
+        },
+        {
+          "type": "if",
+          "condition": {
+            "type": "equals",
+            "left": "{{nativeResult.success}}",
+            "right": false
+          },
+          "then": [
+            {
+              "type": "notify",
+              "title": "Translation Fallback",
+              "message": "Native translation unavailable, using LLM..."
+            },
+            {
+              "type": "callClient",
+              "client": "browser",
+              "method": "browser_get_page_text",
+              "params": {
+                "include_hidden": false
+              },
+              "saveAs": "pageText"
+            },
+            {
+              "type": "notify",
+              "title": "LLM Translation Demo",
+              "message": "This demonstrates manual fallback control. Full LLM integration via callClient would require custom client method."
+            }
+          ],
+          "else": [
+            {
+              "type": "notify",
+              "title": "Translation Complete",
+              "message": "Used native Chrome translation"
+            }
+          ]
+        },
+        {
+          "type": "notify",
+          "title": "Page Cleaned",
+          "message": "Removed {{overlays.length}} overlays, {{blurredElements.length}} blur effects, and enabled scroll"
+        },
+        {
+          "type": "return",
+          "value": {
+            "success": true,
+            "overlaysRemoved": "{{overlays.length}}",
+            "blurEffectsRemoved": "{{blurredElements.length}}",
+            "translationMethod": "{{nativeResult.success}}"
+          }
+        }
+      ]
+    }
+  ]
+}

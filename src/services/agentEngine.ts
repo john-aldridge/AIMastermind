@@ -21,6 +21,8 @@ import {
 import { BrowserClient } from '../clients/BrowserClient';
 import { SettingsService } from './settingsService';
 import { ConfigRegistry } from './configRegistry';
+import { APIService } from '../utils/api';
+import { useAppStore } from '../state/appStore';
 
 /**
  * Execution context for an agent capability
@@ -271,6 +273,9 @@ export class AgentEngine {
 
       case 'notify':
         return await this.executeNotify(action);
+
+      case 'translatePage':
+        return await this.executeTranslatePage(action);
 
       // Process Management
       case 'startProcess':
@@ -657,6 +662,246 @@ export class AgentEngine {
     });
 
     return undefined;
+  }
+
+  private async executeTranslatePage(action: any): Promise<any> {
+    const targetLanguage = this.context!.resolveValue(action.targetLanguage);
+    const sourceLanguage = action.sourceLanguage ?
+      this.context!.resolveValue(action.sourceLanguage) : null;
+    const strategy = action.fallbackStrategy || 'native-then-llm';
+
+    console.log(`[AgentEngine] Translating page with strategy: ${strategy}`);
+
+    const methods = this.getTranslationMethods(strategy);
+
+    for (const method of methods) {
+      try {
+        console.log(`[AgentEngine] Trying translation method: ${method}`);
+        const result = await this.tryTranslationMethod(
+          method,
+          targetLanguage,
+          sourceLanguage
+        );
+
+        if (result.success) {
+          console.log(`[AgentEngine] Translation succeeded using: ${method}`);
+          return {
+            ...result,
+            method_used: method
+          };
+        }
+      } catch (error) {
+        console.log(`[AgentEngine] ${method} translation failed:`, error);
+        // Continue to next method in fallback chain
+        continue;
+      }
+    }
+
+    return {
+      success: false,
+      error: 'All translation methods failed',
+      attempted_methods: methods,
+      suggestion: 'Try updating Chrome to 138+ or configure an LLM for translation'
+    };
+  }
+
+  private getTranslationMethods(strategy: string): string[] {
+    const strategyMap: Record<string, string[]> = {
+      'native-only': ['native'],
+      'llm-only': ['llm'],
+      'google-only': ['google'],
+      'native-then-llm': ['native', 'llm'],
+      'native-then-google': ['native', 'google'],
+      'llm-then-google': ['llm', 'google'],
+      'native-then-llm-then-google': ['native', 'llm', 'google']
+    };
+
+    return strategyMap[strategy] || strategyMap['native-then-llm'];
+  }
+
+  private async tryTranslationMethod(
+    method: string,
+    targetLang: string,
+    sourceLang: string | null
+  ): Promise<any> {
+    const registry = ConfigRegistry.getInstance();
+
+    switch (method) {
+      case 'native': {
+        const result = await registry.executeClientCapability(
+          'browser',
+          'browser_translate_page_native',
+          {
+            target_language: targetLang,
+            source_language: sourceLang || undefined
+          },
+          {}
+        );
+        return result.data;
+      }
+
+      case 'llm':
+        return await this.executeLLMTranslation(targetLang, sourceLang);
+
+      case 'google':
+        return await this.executeGoogleTranslate(targetLang, sourceLang);
+
+      default:
+        throw new Error(`Unknown translation method: ${method}`);
+    }
+  }
+
+  private async executeLLMTranslation(
+    targetLang: string,
+    _sourceLang: string | null
+  ): Promise<any> {
+    const registry = ConfigRegistry.getInstance();
+
+    // Step 1: Extract text nodes from page
+    const pageTextResult = await registry.executeClientCapability(
+      'browser',
+      'browser_get_page_text',
+      { include_hidden: false },
+      {}
+    );
+
+    if (!pageTextResult.data || !pageTextResult.data.text_nodes) {
+      throw new Error('Failed to extract page text for LLM translation');
+    }
+
+    const textNodes = pageTextResult.data.text_nodes;
+
+    if (textNodes.length === 0) {
+      return {
+        success: true,
+        translated_nodes: 0,
+        total_nodes: 0,
+        method: 'llm',
+        message: 'No text to translate'
+      };
+    }
+
+    // Step 2: Prepare translation prompt for LLM
+    const textsToTranslate = textNodes
+      .map((node: any) => `${node.id}|||${node.text}`)
+      .join('\n');
+
+    const prompt = `Translate the following text nodes to ${targetLang}.
+Preserve the ID|||text format exactly. Only translate the text after |||, keep IDs unchanged.
+
+${textsToTranslate}
+
+Return only the translated lines in the same format (ID|||translated_text).`;
+
+    // Step 3: Get user's configured LLM from appStore
+    const appState = useAppStore.getState();
+    const { userConfig } = appState;
+    const activeConfigId = userConfig.activeConfigurationId || 'free-model';
+    const activeConfig = userConfig.savedConfigurations.find((c: any) => c.id === activeConfigId);
+
+    if (!activeConfig) {
+      throw new Error('No active LLM configuration found');
+    }
+
+    // Step 4: Set up API service with user's config
+    const apiService = new APIService();
+    const provider = activeConfig.providerId === 'anthropic' ||
+                     activeConfig.providerId === 'our-models' ? 'claude' : 'openai';
+
+    apiService.setProvider(provider);
+    apiService.setModel(activeConfig.model);
+    apiService.setApiKey(activeConfig.credentials.apiKey || '');
+
+    // Step 5: Call LLM for translation
+    const response = await apiService.generateContent({
+      prompt,
+      systemPrompt: 'You are a professional translator. Return ONLY the translated text in the exact format requested.',
+      maxTokens: 4096
+    }, userConfig.useOwnKey);
+
+    // Step 6: Parse response to extract translations
+    const lines = response.content.trim().split('\n');
+    const replacements: Record<string, string> = {};
+
+    for (const line of lines) {
+      const match = line.match(/^(.+?)\|\|\|(.+)$/);
+      if (match) {
+        const [, nodeId, translatedText] = match;
+        replacements[nodeId] = translatedText;
+      }
+    }
+
+    // Step 7: Replace text on page
+    const replaceResult = await registry.executeClientCapability(
+      'browser',
+      'browser_replace_text',
+      { replacements },
+      {}
+    );
+
+    return {
+      success: true,
+      translated_nodes: Object.keys(replacements).length,
+      total_nodes: textNodes.length,
+      method: 'llm',
+      model_used: activeConfig.model,
+      provider_used: activeConfig.providerId,
+      replaced_result: replaceResult.data
+    };
+  }
+
+  private async executeGoogleTranslate(
+    targetLang: string,
+    sourceLang: string | null
+  ): Promise<any> {
+    // Google Translate injection implementation
+    const script = `
+      (function() {
+        // Check if already translated
+        if (document.querySelector('.goog-te-banner-frame')) {
+          console.log('Page is already being translated');
+          return { success: true, message: 'Translation already active' };
+        }
+
+        // Remove existing Google Translate elements
+        const existing = document.querySelector('#google_translate_element');
+        if (existing) existing.remove();
+
+        // Create container
+        const container = document.createElement('div');
+        container.id = 'google_translate_element';
+        container.style.display = 'none';
+        document.body.appendChild(container);
+
+        // Create script element
+        const script = document.createElement('script');
+        script.src = '//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+
+        // Setup callback
+        window.googleTranslateElementInit = function() {
+          new google.translate.TranslateElement({
+            pageLanguage: ${sourceLang ? `'${sourceLang}'` : 'null'},
+            includedLanguages: '${targetLang}',
+            autoDisplay: false
+          }, 'google_translate_element');
+
+          // Auto-trigger translation
+          setTimeout(() => {
+            const select = document.querySelector('.goog-te-combo');
+            if (select) {
+              select.value = '${targetLang}';
+              select.dispatchEvent(new Event('change'));
+            }
+          }, 1000);
+        };
+
+        document.head.appendChild(script);
+
+        return { success: true, method: 'google' };
+      })();
+    `;
+
+    return await BrowserClient.executeInPageContext(script, [], 5000);
   }
 
   // Process Management

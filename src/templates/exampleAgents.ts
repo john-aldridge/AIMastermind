@@ -9,6 +9,10 @@ import overlayRemoverConfig from './examples/overlay-remover.json';
 import overlayRemoverReadme from './examples/overlay-remover.md?raw';
 import priceExtractorConfig from './examples/price-extractor.json';
 import priceExtractorReadme from './examples/price-extractor.md?raw';
+import pageCleanerConfig from './examples/page-cleaner.json';
+import pageCleanerReadme from './examples/page-cleaner.md?raw';
+import pageCleanerAdvancedConfig from './examples/page-cleaner-advanced.json';
+import pageCleanerAdvancedReadme from './examples/page-cleaner-advanced.md?raw';
 
 export interface ExampleAgent {
   id: string;
@@ -38,6 +42,24 @@ export const EXAMPLE_AGENTS: ExampleAgent[] = [
     difficulty: 'intermediate',
     code: JSON.stringify(priceExtractorConfig, null, 2),
     readme: priceExtractorReadme,
+  },
+  {
+    id: 'page-cleaner',
+    name: 'Page Cleaner & Translator',
+    description: 'Remove overlays, blur effects, restore scroll, and translate to English',
+    tags: ['dom-manipulation', 'translation', 'ux', 'productivity'],
+    difficulty: 'intermediate',
+    code: JSON.stringify(pageCleanerConfig, null, 2),
+    readme: pageCleanerReadme,
+  },
+  {
+    id: 'page-cleaner-advanced',
+    name: 'Page Cleaner & Translator (Advanced)',
+    description: 'Clean and translate with manual fallback control',
+    tags: ['dom-manipulation', 'translation', 'advanced', 'manual-control'],
+    difficulty: 'advanced',
+    code: JSON.stringify(pageCleanerAdvancedConfig, null, 2),
+    readme: pageCleanerAdvancedReadme,
   }
 ];
 
