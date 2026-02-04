@@ -234,6 +234,40 @@ class ToolSessionManagerClass {
   }
 
   /**
+   * Check if a configured agent wraps this client
+   * Returns the agent ID if found, null otherwise
+   */
+  private async getAgentForClient(clientId: string): Promise<string | null> {
+    const agentIds = AgentRegistry.getAllIds();
+    for (const agentId of agentIds) {
+      const agent = AgentRegistry.getInstance(agentId);
+      if (!agent) continue;
+
+      const deps = agent.getDependencies();
+      if (!deps.includes(clientId)) continue;
+
+      // Check if agent is configured
+      const storageKey = `plugin:${agentId}`;
+      const data = await chrome.storage.local.get(storageKey);
+      const config = data[storageKey];
+
+      // Check required config fields
+      const configFields = agent.getConfigFields() || [];
+      const requiredFields = configFields.filter(f => f.required);
+      const hasNoRequired = requiredFields.length === 0;
+      const allFilled = requiredFields.every(f => config?.config?.[f.key]);
+
+      if (hasNoRequired || allFilled) {
+        // Check dependencies can be resolved
+        if (AgentRegistry.canResolveDependencies(agentId)) {
+          return agentId;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Check if a client is configured and active in storage
    */
   private async isClientConfigured(clientId: string): Promise<boolean> {
@@ -275,15 +309,16 @@ class ToolSessionManagerClass {
   /**
    * Get list of active client IDs for loading tools
    * Returns merged list of always-on + non-dismissed suggestions + pinned,
-   * filtered by what's actually configured
+   * filtered by what's actually configured.
+   * Automatically substitutes agents for their dependent clients when available.
    */
   async getActiveClientIds(): Promise<string[]> {
-    const activeIds = new Set<string>();
+    const collectedIds = new Set<string>();
 
     // Add always-on tools
     for (const id of this.session.alwaysOn) {
       if (await this.isClientConfigured(id)) {
-        activeIds.add(id);
+        collectedIds.add(id);
       }
     }
 
@@ -291,7 +326,7 @@ class ToolSessionManagerClass {
     for (const suggestion of this.session.contextSuggested) {
       if (!suggestion.dismissed && !this.session.userRemoved.includes(suggestion.clientId)) {
         if (await this.isClientConfigured(suggestion.clientId)) {
-          activeIds.add(suggestion.clientId);
+          collectedIds.add(suggestion.clientId);
         }
       }
     }
@@ -300,25 +335,40 @@ class ToolSessionManagerClass {
     for (const id of this.session.userPinned) {
       if (!this.session.userRemoved.includes(id)) {
         if (await this.isClientConfigured(id)) {
-          activeIds.add(id);
+          collectedIds.add(id);
         }
       }
     }
 
-    return Array.from(activeIds);
+    // Substitute agents for clients when available
+    const finalIds = new Set<string>();
+    for (const id of collectedIds) {
+      // Check if this is a client that has a configured agent
+      if (ClientRegistry.has(id)) {
+        const agentId = await this.getAgentForClient(id);
+        if (agentId && !this.session.userRemoved.includes(agentId)) {
+          finalIds.add(agentId);
+          continue;
+        }
+      }
+      finalIds.add(id);
+    }
+
+    return Array.from(finalIds);
   }
 
   /**
    * Get active tools with their source information
+   * Automatically substitutes agents for their dependent clients when available.
    */
   async getActiveTools(): Promise<ActiveTool[]> {
-    const tools: ActiveTool[] = [];
+    const collectedTools: ActiveTool[] = [];
     const added = new Set<string>();
 
     // Add always-on tools first
     for (const id of this.session.alwaysOn) {
       if (await this.isClientConfigured(id)) {
-        tools.push({ clientId: id, source: 'always-on' });
+        collectedTools.push({ clientId: id, source: 'always-on' });
         added.add(id);
       }
     }
@@ -327,7 +377,7 @@ class ToolSessionManagerClass {
     for (const id of this.session.userPinned) {
       if (!added.has(id) && !this.session.userRemoved.includes(id)) {
         if (await this.isClientConfigured(id)) {
-          tools.push({ clientId: id, source: 'user-pinned' });
+          collectedTools.push({ clientId: id, source: 'user-pinned' });
           added.add(id);
         }
       }
@@ -337,7 +387,7 @@ class ToolSessionManagerClass {
     for (const suggestion of this.session.contextSuggested) {
       if (!added.has(suggestion.clientId) && !suggestion.dismissed && !this.session.userRemoved.includes(suggestion.clientId)) {
         if (await this.isClientConfigured(suggestion.clientId)) {
-          tools.push({
+          collectedTools.push({
             clientId: suggestion.clientId,
             source: 'context-suggested',
             reason: suggestion.reason,
@@ -348,7 +398,31 @@ class ToolSessionManagerClass {
       }
     }
 
-    return tools;
+    // Substitute agents for clients when available
+    const finalTools: ActiveTool[] = [];
+    const finalAdded = new Set<string>();
+    for (const tool of collectedTools) {
+      // Check if this is a client that has a configured agent
+      if (ClientRegistry.has(tool.clientId)) {
+        const agentId = await this.getAgentForClient(tool.clientId);
+        if (agentId && !this.session.userRemoved.includes(agentId) && !finalAdded.has(agentId)) {
+          finalTools.push({
+            clientId: agentId,
+            source: tool.source,
+            reason: tool.reason,
+            confidence: tool.confidence,
+          });
+          finalAdded.add(agentId);
+          continue;
+        }
+      }
+      if (!finalAdded.has(tool.clientId)) {
+        finalTools.push(tool);
+        finalAdded.add(tool.clientId);
+      }
+    }
+
+    return finalTools;
   }
 
   /**

@@ -23,6 +23,8 @@ interface AvailableTool {
   source?: 'always-on' | 'context-suggested' | 'user-pinned';
   category: 'client' | 'plugin';
   tags?: string[];
+  hasAgentWrapper?: string; // Agent ID that wraps this client
+  wrappedByActiveAgent?: boolean; // Is the wrapping agent currently active?
 }
 
 export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClose }) => {
@@ -30,6 +32,7 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'client' | 'agent'>('all');
 
   const loadTools = async () => {
     setLoading(true);
@@ -37,6 +40,41 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
       const availableTools: AvailableTool[] = [];
       const activeToolsList = await toolSessionManager.getActiveTools();
       const activeMap = new Map(activeToolsList.map(t => [t.clientId, t.source]));
+
+      // Build a map of client IDs to agents that wrap them
+      const clientToAgentMap = new Map<string, { agentId: string; agentName: string; isActive: boolean; isConfigured: boolean }>();
+      const allAgentIds = AgentRegistry.getAllIds();
+
+      for (const aId of allAgentIds) {
+        const agentInstance = AgentRegistry.getInstance(aId);
+        const agentMetadata = AgentRegistry.getMetadata(aId);
+        if (agentInstance && agentMetadata) {
+          const dependencies = agentInstance.getDependencies();
+
+          // Check if agent is configured
+          const storageKey = `plugin:${aId}`;
+          const data = await chrome.storage.local.get(storageKey);
+          const pluginConfig = data[storageKey];
+          const configFields = agentInstance.getConfigFields() || [];
+          const requiredFields = configFields.filter(f => f.required);
+          const hasNoRequiredFields = requiredFields.length === 0;
+          const allRequiredFieldsFilled = requiredFields.every(
+            field => pluginConfig?.config?.[field.key]
+          );
+          const isAgentConfigured = hasNoRequiredFields || allRequiredFieldsFilled;
+          const canResolveDeps = AgentRegistry.canResolveDependencies(aId);
+
+          // Map each dependency to this agent
+          for (const dep of dependencies) {
+            clientToAgentMap.set(dep, {
+              agentId: aId,
+              agentName: agentMetadata.name,
+              isActive: activeMap.has(aId),
+              isConfigured: isAgentConfigured && canResolveDeps,
+            });
+          }
+        }
+      }
 
       // Get all registered clients
       const clientIds = ClientRegistry.getAllIds();
@@ -64,6 +102,13 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
           // Only show configured clients (except always-on which are always shown)
           const isAlwaysOn = id === 'browser';
           if (isConfigured || isAlwaysOn) {
+            const agentWrapper = clientToAgentMap.get(id);
+
+            // Skip this client if its agent wrapper is active (prefer agents over raw clients)
+            if (agentWrapper?.isActive) {
+              continue;
+            }
+
             availableTools.push({
               clientId: id,
               name: metadata.name,
@@ -72,14 +117,16 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
               source: activeMap.get(id),
               category: 'client',
               tags: metadata.tags,
+              hasAgentWrapper: agentWrapper?.isConfigured ? agentWrapper.agentId : undefined,
+              wrappedByActiveAgent: agentWrapper?.isActive,
             });
           }
         }
       }
 
-      // Get all registered plugins
-      const pluginIds = AgentRegistry.getAllIds();
-      for (const id of pluginIds) {
+      // Get all registered agents (plugins)
+      const agentIds = AgentRegistry.getAllIds();
+      for (const id of agentIds) {
         const metadata = AgentRegistry.getMetadata(id);
         if (metadata) {
           // Check if configured
@@ -87,7 +134,25 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
           const data = await chrome.storage.local.get(storageKey);
           const pluginConfig = data[storageKey];
 
-          if (pluginConfig?.config && pluginConfig?.isActive) {
+          // Get the agent's config fields to check which are required
+          const agentInstance = AgentRegistry.getInstance(id);
+          const configFields = agentInstance?.getConfigFields() || [];
+          const requiredFields = configFields.filter(f => f.required);
+
+          // Agent is configured if:
+          // 1. It has no required config fields, OR
+          // 2. All required config fields are filled in
+          const hasNoRequiredFields = requiredFields.length === 0;
+          const allRequiredFieldsFilled = requiredFields.every(
+            field => pluginConfig?.config?.[field.key]
+          );
+          const isConfigured = hasNoRequiredFields || allRequiredFieldsFilled;
+
+          // Check if dependencies are satisfied
+          const canResolveDeps = AgentRegistry.canResolveDependencies(id);
+
+          // Show agent if configured and dependencies are met
+          if (isConfigured && canResolveDeps) {
             availableTools.push({
               clientId: id,
               name: metadata.name,
@@ -152,7 +217,13 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
       (activeFilter === 'active' && tool.isActive) ||
       (activeFilter === 'inactive' && !tool.isActive);
 
-    return matchesSearch && matchesActive;
+    // Apply type filter
+    const matchesType =
+      typeFilter === 'all' ||
+      (typeFilter === 'client' && tool.category === 'client') ||
+      (typeFilter === 'agent' && tool.category === 'plugin');
+
+    return matchesSearch && matchesActive && matchesType;
   });
 
   // Group by category
@@ -197,20 +268,51 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
             </svg>
           </div>
 
-          <div className="flex gap-2">
-            {(['all', 'active', 'inactive'] as const).map((filter) => (
-              <button
-                key={filter}
-                onClick={() => setActiveFilter(filter)}
-                className={`px-3 py-1 text-xs rounded-full transition-colors ${
-                  activeFilter === filter
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {filter.charAt(0).toUpperCase() + filter.slice(1)}
-              </button>
-            ))}
+          {/* Type filter (left) and Status filter (right) */}
+          <div className="flex items-center justify-between">
+            {/* Type filter */}
+            <div className="flex gap-1">
+              {(['all', 'client', 'agent'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setTypeFilter(filter)}
+                  className={`px-2.5 py-1 text-xs rounded-full transition-colors flex items-center gap-1 ${
+                    typeFilter === filter
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {filter === 'client' && (
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                    </svg>
+                  )}
+                  {filter === 'agent' && (
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  )}
+                  {filter === 'all' ? 'All Types' : filter.charAt(0).toUpperCase() + filter.slice(1) + 's'}
+                </button>
+              ))}
+            </div>
+
+            {/* Status filter */}
+            <div className="flex gap-1">
+              {(['all', 'active', 'inactive'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setActiveFilter(filter)}
+                  className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
+                    activeFilter === filter
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -227,14 +329,14 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
             </div>
           ) : (
             <>
-              {/* Clients Section */}
-              {clientTools.length > 0 && (
+              {/* Agents Section - shown first */}
+              {pluginTools.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                    Clients
+                    Agents
                   </h3>
                   <div className="space-y-2">
-                    {clientTools.map((tool) => (
+                    {pluginTools.map((tool) => (
                       <ToolItem
                         key={tool.clientId}
                         tool={tool}
@@ -245,14 +347,14 @@ export const ToolPickerModal: React.FC<ToolPickerModalProps> = ({ isOpen, onClos
                 </div>
               )}
 
-              {/* Plugins Section */}
-              {pluginTools.length > 0 && (
+              {/* Clients Section - shown second */}
+              {clientTools.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                    Plugins
+                    Clients
                   </h3>
                   <div className="space-y-2">
-                    {pluginTools.map((tool) => (
+                    {clientTools.map((tool) => (
                       <ToolItem
                         key={tool.clientId}
                         tool={tool}
@@ -288,7 +390,7 @@ const ToolItem: React.FC<ToolItemProps> = ({ tool, onToggle }) => {
   const getSourceBadge = () => {
     switch (tool.source) {
       case 'always-on':
-        return <span className="text-xs text-gray-400">Always on</span>;
+        return <span className="text-xs text-gray-400 font-medium">Always on</span>;
       case 'context-suggested':
         return <span className="text-xs text-blue-500">Suggested</span>;
       case 'user-pinned':
@@ -298,35 +400,53 @@ const ToolItem: React.FC<ToolItemProps> = ({ tool, onToggle }) => {
     }
   };
 
+  const getTypeIcon = () => {
+    if (tool.category === 'client') {
+      return (
+        <svg className={`w-4 h-4 flex-shrink-0 ${isAlwaysOn ? 'text-gray-300' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <title>Client</title>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+        </svg>
+      );
+    } else {
+      return (
+        <svg className="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <title>Agent</title>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+      );
+    }
+  };
+
   return (
     <div
       className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-        tool.isActive
+        isAlwaysOn
+          ? 'bg-gray-50 border-gray-200 opacity-75'
+          : tool.isActive
           ? 'bg-blue-50 border-blue-200'
           : 'bg-white border-gray-200 hover:bg-gray-50'
       }`}
     >
-      <div className="flex-1 min-w-0 mr-3">
+      <div className={`flex-1 min-w-0 mr-3 ${isAlwaysOn ? 'opacity-80' : ''}`}>
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-gray-900 truncate">
+          {getTypeIcon()}
+          <span className={`font-medium text-sm truncate ${isAlwaysOn ? 'text-gray-600' : 'text-gray-900'}`}>
             {tool.name}
           </span>
           {getSourceBadge()}
         </div>
-        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
+        <p className={`text-xs mt-0.5 line-clamp-2 ${isAlwaysOn ? 'text-gray-400' : 'text-gray-500'}`}>
           {tool.description}
         </p>
-        {tool.tags && tool.tags.length > 0 && (
-          <div className="flex gap-1 mt-1 flex-wrap">
-            {tool.tags.slice(0, 3).map((tag) => (
-              <span
-                key={tag}
-                className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
+        {/* Hint when client has an agent wrapper available */}
+        {tool.hasAgentWrapper && (
+          <p className="text-xs text-purple-600 mt-1 flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Smart agent available - consider using the agent instead
+          </p>
         )}
       </div>
 
@@ -335,7 +455,7 @@ const ToolItem: React.FC<ToolItemProps> = ({ tool, onToggle }) => {
         disabled={isAlwaysOn}
         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
           isAlwaysOn
-            ? 'bg-gray-300 cursor-not-allowed'
+            ? 'bg-gray-400 cursor-not-allowed'
             : tool.isActive
             ? 'bg-blue-600'
             : 'bg-gray-200'
