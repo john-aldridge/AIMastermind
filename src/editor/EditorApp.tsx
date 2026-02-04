@@ -1,3 +1,10 @@
+// Import Monaco workers using Vite's native ?worker syntax
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
+import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
+import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
+
 import React, { useState, useEffect, useRef } from 'react';
 import { MonacoEditor } from '../sidepanel/components/MonacoEditor';
 import { VersionManager } from '../sidepanel/components/VersionManager';
@@ -11,49 +18,23 @@ import { ConfigStorageService } from '../storage/configStorage';
 import { ConfigRegistry } from '../services/configRegistry';
 import type { AgentConfig } from '../types/agentConfig';
 
-// Disable Monaco workers globally before any Monaco code runs
-// Use a proper stub worker that extends EventTarget to prevent errors
+// Configure Monaco to use Vite-bundled workers
 if (typeof window !== 'undefined') {
-  // Create a stub worker that properly implements the Worker interface
-  class StubWorker extends EventTarget {
-    onmessage: ((this: Worker, ev: MessageEvent) => any) | null = null;
-    onerror: ((this: AbstractWorker, ev: ErrorEvent) => any) | null = null;
-    onmessageerror: ((this: Worker, ev: MessageEvent) => any) | null = null;
-
-    postMessage(_message: any, _transfer?: Transferable[]): void {
-      // Silently ignore all messages
-      // Monaco will try to send messages, but we do nothing
-    }
-
-    terminate(): void {
-      // No-op - nothing to terminate
-    }
-
-    // Satisfy TypeScript's Worker interface
-    addEventListener(
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: boolean | AddEventListenerOptions
-    ): void {
-      super.addEventListener(type, listener, options);
-    }
-
-    removeEventListener(
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: boolean | EventListenerOptions
-    ): void {
-      super.removeEventListener(type, listener, options);
-    }
-
-    dispatchEvent(event: Event): boolean {
-      return super.dispatchEvent(event);
-    }
-  }
-
   (window as any).MonacoEnvironment = {
-    getWorker() {
-      return new StubWorker() as any;
+    getWorker: function (_moduleId: string, label: string) {
+      if (label === 'json') {
+        return new JsonWorker();
+      }
+      if (label === 'css' || label === 'scss' || label === 'less') {
+        return new CssWorker();
+      }
+      if (label === 'html' || label === 'handlebars' || label === 'razor') {
+        return new HtmlWorker();
+      }
+      if (label === 'typescript' || label === 'javascript') {
+        return new TsWorker();
+      }
+      return new EditorWorker();
     }
   };
 }

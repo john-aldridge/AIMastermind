@@ -1,9 +1,13 @@
 import { defineConfig, build } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
-import { copyFileSync, mkdirSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync } from 'fs';
+import { build as esbuild } from 'esbuild';
 
 export default defineConfig({
+  worker: {
+    format: 'es', // ES modules for workers (modern standard)
+  },
   plugins: [
     react(),
     {
