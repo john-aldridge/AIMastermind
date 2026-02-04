@@ -1,17 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppStore, ChatMessage } from '@/state/appStore';
 import { apiService, ToolDefinition } from '@/utils/api';
 import { MessageType } from '@/utils/messaging';
 import { FileAnalysis } from './FileAnalysis';
 import { ClientRegistry } from '@/clients';
 import { AgentRegistry } from '@/agents';
+import { toolSessionManager } from '@/services/toolSessionManager';
+import { ActiveToolsBar } from './ActiveToolsBar';
+import { ToolPickerModal } from './ToolPickerModal';
 
-interface TabContext {
+interface TabMetadata {
   tabId: number;
   title: string;
   url: string;
-  content: string;
+  favIconUrl?: string;
+}
+
+interface TabContext extends TabMetadata {
   selected: boolean;
+  content?: string;  // Now optional, loaded on-demand
 }
 
 interface DownloadInfo {
@@ -29,268 +36,296 @@ export const ChatView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [tabs, setTabs] = useState<TabContext[]>([]);
   const [showTabSelector, setShowTabSelector] = useState(false);
+  const [showAddTabsDropdown, setShowAddTabsDropdown] = useState(false);
   const [showFileAnalysis, setShowFileAnalysis] = useState(false);
   const [currentFile, setCurrentFile] = useState<{ name: string; content: string; info: DownloadInfo } | null>(null);
   const [availableTools, setAvailableTools] = useState<ToolDefinition[]>([]);
+  const [showToolPicker, setShowToolPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const addTabsDropdownRef = useRef<HTMLDivElement>(null);
+  const tabSelectorRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Capture context from all tabs and load tools
+  // Refresh tab metadata on mount (tools loaded later after loadAvailableTools is defined)
   useEffect(() => {
-    captureAllTabs();
-
-    // Delay loading tools to ensure clients are registered first
-    // (registerAllClients runs in SidePanelApp's useEffect which may not be complete yet)
-    const timer = setTimeout(() => {
-      loadAvailableTools();
-    }, 100);
-
-    return () => clearTimeout(timer);
+    refreshTabMetadata();
   }, []);
 
-  // Re-capture tabs when window regains focus
+  // Close dropdowns when clicking outside or when sidepanel loses focus
   useEffect(() => {
-    const handleFocus = () => {
-      captureAllTabs();
-    };
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        captureAllTabs();
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        showAddTabsDropdown &&
+        addTabsDropdownRef.current &&
+        !addTabsDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowAddTabsDropdown(false);
+      }
+      if (
+        showTabSelector &&
+        tabSelectorRef.current &&
+        !tabSelectorRef.current.contains(event.target as Node)
+      ) {
+        setShowTabSelector(false);
       }
     };
 
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    const handleBlur = () => {
+      if (showAddTabsDropdown) {
+        setShowAddTabsDropdown(false);
+      }
+      if (showTabSelector) {
+        setShowTabSelector(false);
+      }
     };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [showAddTabsDropdown, showTabSelector]);
+
+  // Listen for tab change messages from background script
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (message.type === MessageType.TAB_CHANGED) {
+        refreshTabMetadata();
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
   }, []);
 
-  const captureAllTabs = async () => {
+
+  // Lightweight function that only queries tab metadata (no content capture)
+  const refreshTabMetadata = async () => {
     try {
       const allTabs = await chrome.tabs.query({ currentWindow: true });
       const activeTab = await chrome.tabs.query({ active: true, currentWindow: true });
       const activeTabId = activeTab[0]?.id;
+      const activeTabUrl = activeTab[0]?.url;
 
-      const tabContexts: TabContext[] = [];
+      setTabs(prevTabs => {
+        // Preserve selection state for existing tabs
+        const prevSelected = new Set(prevTabs.filter(t => t.selected).map(t => t.tabId));
 
-      for (const tab of allTabs) {
-        if (!tab.id) continue;
-
-        let content = '';
-        try {
-          // Execute script to get page content
-          const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => {
-              const body = document.body;
-              const text = body.innerText || body.textContent || '';
-              // Limit to first 3000 characters per tab
-              return text.slice(0, 3000);
-            },
-          });
-
-          content = results[0]?.result || 'Unable to capture content';
-        } catch (error) {
-          content = 'Unable to capture content (restricted page)';
-        }
-
-        tabContexts.push({
-          tabId: tab.id,
+        return allTabs.filter(tab => tab.id).map(tab => ({
+          tabId: tab.id!,
           title: tab.title || 'Untitled',
           url: tab.url || '',
-          content,
-          selected: tab.id === activeTabId, // Auto-select active tab
-        });
-      }
+          favIconUrl: tab.favIconUrl,
+          // Keep previous selection, or auto-select if it's the active tab and no previous selection exists
+          selected: prevSelected.has(tab.id!) || (prevSelected.size === 0 && tab.id === activeTabId),
+        }));
+      });
 
-      setTabs(tabContexts);
+      // Update tool session context based on active tab URL
+      if (activeTabUrl) {
+        toolSessionManager.updateContext(activeTabUrl);
+      }
     } catch (error) {
-      console.error('Error capturing tabs:', error);
+      console.error('Error refreshing tab metadata:', error);
     }
   };
 
-  const loadAvailableTools = async () => {
-    try {
-      console.log('[ChatView] Loading available tools from configured clients and plugins...');
-      const tools: ToolDefinition[] = [];
-
-      // Load tools from clients
-      const clientIds = ClientRegistry.getAllIds();
-      console.log('[ChatView] Found registered clients:', clientIds);
-
-      for (const clientId of clientIds) {
-        // Check if client is configured
-        const storageKey = `client:${clientId}`;
-        const data = await chrome.storage.local.get(storageKey);
-        const clientConfig = data[storageKey];
-
-        // Get client instance first to check if it requires credentials
-        const clientInstance = ClientRegistry.getInstance(clientId);
-        if (!clientInstance) {
-          console.warn(`[ChatView] Could not get instance for ${clientId}`);
-          continue;
-        }
-
-        // Check if client is configured based on whether it requires credentials
-        const credentialFields = clientInstance.getCredentialFields();
-        const requiresCredentials = credentialFields.length > 0;
-
-        let isConfigured = false;
-        if (requiresCredentials) {
-          // For clients that require credentials, check they're provided
-          isConfigured = !!clientConfig?.credentials && Object.keys(clientConfig.credentials).length > 0;
-        } else {
-          // For clients with no credentials, just check if storage entry exists
-          isConfigured = !!clientConfig;
-        }
-
-        if (!isConfigured || !clientConfig?.isActive) {
-          console.log(`[ChatView] Client ${clientId} not configured or not active, skipping`);
-          continue;
-        }
-
-        console.log(`[ChatView] Loading tools from client ${clientId}...`);
-
-        // Load credentials
-        clientInstance.setCredentials(clientConfig.credentials || {});
-
-        // Get capabilities and convert to tool definitions
-        const capabilities = clientInstance.getCapabilities();
-        console.log(`[ChatView] Client ${clientId} has ${capabilities.length} capabilities`);
-
-        for (const capability of capabilities) {
-          const properties: Record<string, any> = {};
-          const required: string[] = [];
-
-          for (const param of capability.parameters) {
-            properties[param.name] = {
-              type: param.type,
-              description: param.description,
-              ...(param.default !== undefined && { default: param.default }),
-            };
-
-            if (param.required) {
-              required.push(param.name);
-            }
-          }
-
-          tools.push({
-            name: capability.name,
-            description: capability.description,
-            input_schema: {
-              type: 'object',
-              properties,
-              required,
-            },
-          });
-        }
-      }
-
-      // Load tools from plugins
-      const agentIds = AgentRegistry.getAllIds();
-      console.log('[ChatView] Found registered plugins:', agentIds);
-
-      for (const agentId of agentIds) {
-        // Check if plugin is configured
-        const storageKey = `plugin:${agentId}`;
-        const data = await chrome.storage.local.get(storageKey);
-        const pluginConfig = data[storageKey];
-
-        if (!pluginConfig?.config || !pluginConfig.isActive) {
-          console.log(`[ChatView] Plugin ${agentId} not configured or not active, skipping`);
-          continue;
-        }
-
-        console.log(`[ChatView] Loading tools from plugin ${agentId}...`);
-
-        // Get plugin instance and load config
-        const pluginInstance = AgentRegistry.getInstance(agentId);
-        if (!pluginInstance) {
-          console.warn(`[ChatView] Could not get instance for ${agentId}`);
-          continue;
-        }
-
-        pluginInstance.setConfig(pluginConfig.config);
-
-        // Resolve dependencies
-        const dependencies = pluginInstance.getDependencies();
-        for (const dep of dependencies) {
-          const clientInstance = ClientRegistry.getInstance(dep);
-          if (clientInstance) {
-            const clientStorageKey = `client:${dep}`;
-            const clientData = await chrome.storage.local.get(clientStorageKey);
-            const clientConfig = clientData[clientStorageKey];
-
-            if (clientConfig?.credentials) {
-              clientInstance.setCredentials(clientConfig.credentials);
-              await clientInstance.initialize();
-              pluginInstance.setDependency(dep, clientInstance);
-            }
-          }
-        }
-
-        // Get capabilities and convert to tool definitions
-        const capabilities = pluginInstance.getCapabilities();
-        console.log(`[ChatView] Plugin ${agentId} has ${capabilities.length} capabilities`);
-
-        for (const capability of capabilities) {
-          const properties: Record<string, any> = {};
-          const required: string[] = [];
-
-          for (const param of capability.parameters) {
-            properties[param.name] = {
-              type: param.type,
-              description: param.description,
-              ...(param.default !== undefined && { default: param.default }),
-            };
-
-            if (param.required) {
-              required.push(param.name);
-            }
-          }
-
-          tools.push({
-            name: capability.name,
-            description: capability.description,
-            input_schema: {
-              type: 'object',
-              properties,
-              required,
-            },
-          });
-        }
-      }
-
-      console.log(`[ChatView] Loaded ${tools.length} tools total:`, tools.map(t => t.name));
-      setAvailableTools(tools);
-    } catch (error) {
-      console.error('[ChatView] Error loading tools:', error);
-    }
-  };
-
-  const toggleTabSelection = (tabId: number) => {
-    setTabs(tabs.map(tab =>
-      tab.tabId === tabId ? { ...tab, selected: !tab.selected } : tab
-    ));
-  };
-
-  const getSelectedContext = (): string => {
+  // Capture content just-in-time for selected tabs only (called when sending a message)
+  const captureContentForSelectedTabs = async (): Promise<string> => {
     const selectedTabs = tabs.filter(tab => tab.selected);
     if (selectedTabs.length === 0) {
       return 'No tabs selected for context.';
     }
 
-    return selectedTabs.map(tab =>
-      `=== Tab: ${tab.title} ===\nURL: ${tab.url}\n\nContent:\n${tab.content}`
-    ).join('\n\n---\n\n');
+    const contexts: string[] = [];
+
+    for (const tab of selectedTabs) {
+      let content = '';
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.tabId },
+          func: () => {
+            const text = document.body?.innerText || document.body?.textContent || '';
+            return text.slice(0, 3000);
+          },
+        });
+        content = results[0]?.result || 'Unable to capture content';
+      } catch (error) {
+        content = 'Unable to capture content (restricted page)';
+      }
+
+      contexts.push(`=== Tab: ${tab.title} ===\nURL: ${tab.url}\n\nContent:\n${content}`);
+    }
+
+    return contexts.join('\n\n---\n\n');
+  };
+
+  const loadAvailableTools = useCallback(async () => {
+    try {
+      console.log('[ChatView] Loading available tools based on active session...');
+      const tools: ToolDefinition[] = [];
+
+      // Get active client IDs from the tool session manager
+      const activeClientIds = await toolSessionManager.getActiveClientIds();
+      console.log('[ChatView] Active clients from session:', activeClientIds);
+
+      // Load tools from active clients
+      for (const clientId of activeClientIds) {
+        // Check if it's a registered client
+        if (ClientRegistry.has(clientId)) {
+          const clientInstance = ClientRegistry.getInstance(clientId);
+          if (!clientInstance) {
+            console.warn(`[ChatView] Could not get instance for ${clientId}`);
+            continue;
+          }
+
+          // Load config from storage
+          const storageKey = `client:${clientId}`;
+          const data = await chrome.storage.local.get(storageKey);
+          const clientConfig = data[storageKey];
+
+          if (clientConfig) {
+            clientInstance.setCredentials(clientConfig.credentials || {});
+          }
+
+          // Get capabilities and convert to tool definitions
+          const capabilities = clientInstance.getCapabilities();
+          console.log(`[ChatView] Client ${clientId} has ${capabilities.length} capabilities`);
+
+          for (const capability of capabilities) {
+            const properties: Record<string, any> = {};
+            const required: string[] = [];
+
+            for (const param of capability.parameters) {
+              properties[param.name] = {
+                type: param.type,
+                description: param.description,
+                ...(param.default !== undefined && { default: param.default }),
+              };
+
+              if (param.required) {
+                required.push(param.name);
+              }
+            }
+
+            tools.push({
+              name: capability.name,
+              description: capability.description,
+              input_schema: {
+                type: 'object',
+                properties,
+                required,
+              },
+            });
+          }
+        }
+
+        // Check if it's a registered plugin
+        if (AgentRegistry.has(clientId)) {
+          const pluginInstance = AgentRegistry.getInstance(clientId);
+          if (!pluginInstance) {
+            console.warn(`[ChatView] Could not get instance for ${clientId}`);
+            continue;
+          }
+
+          // Load config from storage
+          const storageKey = `plugin:${clientId}`;
+          const data = await chrome.storage.local.get(storageKey);
+          const pluginConfig = data[storageKey];
+
+          if (pluginConfig?.config) {
+            pluginInstance.setConfig(pluginConfig.config);
+
+            // Resolve dependencies
+            const dependencies = pluginInstance.getDependencies();
+            for (const dep of dependencies) {
+              const depInstance = ClientRegistry.getInstance(dep);
+              if (depInstance) {
+                const clientStorageKey = `client:${dep}`;
+                const clientData = await chrome.storage.local.get(clientStorageKey);
+                const clientConfig = clientData[clientStorageKey];
+
+                if (clientConfig?.credentials) {
+                  depInstance.setCredentials(clientConfig.credentials);
+                  await depInstance.initialize();
+                  pluginInstance.setDependency(dep, depInstance);
+                }
+              }
+            }
+          }
+
+          // Get capabilities and convert to tool definitions
+          const capabilities = pluginInstance.getCapabilities();
+          console.log(`[ChatView] Plugin ${clientId} has ${capabilities.length} capabilities`);
+
+          for (const capability of capabilities) {
+            const properties: Record<string, any> = {};
+            const required: string[] = [];
+
+            for (const param of capability.parameters) {
+              properties[param.name] = {
+                type: param.type,
+                description: param.description,
+                ...(param.default !== undefined && { default: param.default }),
+              };
+
+              if (param.required) {
+                required.push(param.name);
+              }
+            }
+
+            tools.push({
+              name: capability.name,
+              description: capability.description,
+              input_schema: {
+                type: 'object',
+                properties,
+                required,
+              },
+            });
+          }
+        }
+      }
+
+      console.log(`[ChatView] Loaded ${tools.length} tools from ${activeClientIds.length} active clients:`, tools.map(t => t.name));
+      setAvailableTools(tools);
+    } catch (error) {
+      console.error('[ChatView] Error loading tools:', error);
+    }
+  }, []);
+
+  // Load tools on mount (delayed to ensure clients are registered first)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadAvailableTools();
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [loadAvailableTools]);
+
+  // Subscribe to tool session changes to reload tools when context changes
+  useEffect(() => {
+    const unsubscribe = toolSessionManager.subscribe(() => {
+      loadAvailableTools();
+    });
+
+    return () => unsubscribe();
+  }, [loadAvailableTools]);
+
+  // Callback for ActiveToolsBar to trigger tool reload
+  const handleToolsChange = useCallback(() => {
+    loadAvailableTools();
+  }, [loadAvailableTools]);
+
+  const toggleTabSelection = (tabId: number) => {
+    setTabs(tabs.map(tab =>
+      tab.tabId === tabId ? { ...tab, selected: !tab.selected } : tab
+    ));
   };
 
   const executeToolCall = async (toolName: string, toolInput: Record<string, any>): Promise<any> => {
@@ -395,8 +430,8 @@ export const ChatView: React.FC = () => {
     console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #2196F3');
 
     try {
-      // Construct prompt with context from selected tabs
-      const pageContext = getSelectedContext();
+      // Capture content just-in-time for selected tabs
+      const pageContext = await captureContentForSelectedTabs();
 
       // Add network monitoring data if available
       let contextPrompt = '';
@@ -700,63 +735,159 @@ export const ChatView: React.FC = () => {
     setInput(`Analyze this file: ${filename}`);
   };
 
+  // Helper component for tab favicons
+  const TabFavicon: React.FC<{ url?: string; size?: number }> = ({ url, size = 16 }) => {
+    if (url) {
+      return (
+        <img
+          src={url}
+          className="w-4 h-4 rounded flex-shrink-0"
+          style={{ width: size, height: size }}
+          alt=""
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+      );
+    }
+    // Default globe icon for tabs without favicon
+    return (
+      <svg className="w-4 h-4 text-gray-400 flex-shrink-0" style={{ width: size, height: size }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+      </svg>
+    );
+  };
+
+  const selectedTabs = tabs.filter(t => t.selected);
+  const singleTabSelected = selectedTabs.length === 1;
+
   return (
     <div className="flex flex-col h-full">
       {/* Tab Context Selector */}
-      <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setShowTabSelector(!showTabSelector)}
-            className="flex items-center gap-2 text-sm text-blue-900 hover:text-blue-700"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-            </svg>
-            <span className="font-medium">
-              {tabs.filter(t => t.selected).length} of {tabs.length} tabs selected
-            </span>
-            <svg className={`w-3 h-3 transition-transform ${showTabSelector ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <button
-            onClick={captureAllTabs}
-            className="text-xs text-blue-700 hover:text-blue-800"
-            title="Refresh tabs"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
+      <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex-shrink-0 relative">
+        <div className="flex items-center justify-between gap-2">
+          {/* Left side: Tab info */}
+          {singleTabSelected ? (
+            // Single tab view: favicon + title
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <TabFavicon url={selectedTabs[0]?.favIconUrl} />
+              <span className="text-sm font-medium text-blue-900 truncate">
+                {selectedTabs[0]?.title || 'No tab selected'}
+              </span>
+            </div>
+          ) : selectedTabs.length > 1 ? (
+            // Multiple tabs view: "X tabs selected" dropdown
+            <button
+              onClick={() => setShowTabSelector(!showTabSelector)}
+              className="flex items-center gap-2 text-sm text-blue-900 hover:text-blue-700 min-w-0"
+            >
+              <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              <span className="font-medium">{selectedTabs.length} tabs selected</span>
+              <svg className={`w-3 h-3 transition-transform flex-shrink-0 ${showTabSelector ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          ) : (
+            // No tabs selected
+            <span className="text-sm text-gray-500 italic">No tabs selected</span>
+          )}
+
+          {/* Right side: Add more tabs button */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShowAddTabsDropdown(!showAddTabsDropdown)}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 bg-white border border-blue-200 rounded-md px-2 py-1"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>Add tabs</span>
+            </button>
+          </div>
         </div>
 
-        {/* Tab List */}
-        {showTabSelector && (
-          <div className="mt-2 max-h-48 overflow-y-auto space-y-1">
-            {tabs.map(tab => (
-              <label
+        {/* Selected tabs dropdown (for multiple tabs) */}
+        {showTabSelector && selectedTabs.length > 1 && (
+          <div ref={tabSelectorRef} className="mt-2 bg-white border border-blue-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+            <div className="p-2 border-b border-blue-100 text-xs text-gray-500 font-medium">
+              Selected tabs
+            </div>
+            {selectedTabs.map(tab => (
+              <div
                 key={tab.tabId}
-                className="flex items-start gap-2 p-2 hover:bg-blue-100 rounded cursor-pointer"
+                className="flex items-center gap-2 p-2 hover:bg-blue-50"
               >
-                <input
-                  type="checkbox"
-                  checked={tab.selected}
-                  onChange={() => toggleTabSelection(tab.tabId)}
-                  className="mt-0.5 flex-shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-blue-900 truncate">
-                    {tab.title}
-                  </div>
-                  <div className="text-xs text-blue-600 truncate">
-                    {tab.url}
-                  </div>
-                </div>
-              </label>
+                <TabFavicon url={tab.favIconUrl} />
+                <span className="text-xs text-blue-900 truncate flex-1 min-w-0">
+                  {tab.title}
+                </span>
+                <button
+                  onClick={() => toggleTabSelection(tab.tabId)}
+                  className="text-gray-400 hover:text-red-500 flex-shrink-0 p-0.5"
+                  title="Remove from context"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             ))}
           </div>
         )}
+
+        {/* Add more tabs dropdown */}
+        {showAddTabsDropdown && (
+          <div
+            ref={addTabsDropdownRef}
+            className="absolute left-4 right-4 top-full mt-1 bg-white border border-blue-200 rounded-lg shadow-lg max-h-64 overflow-hidden z-10"
+          >
+            <div className="flex items-center justify-between p-2 border-b border-blue-100 sticky top-0 bg-white">
+              <span className="text-xs text-gray-500 font-medium">All tabs in window</span>
+              <button
+                onClick={() => setShowAddTabsDropdown(false)}
+                className="text-gray-400 hover:text-gray-600 p-0.5"
+                title="Close"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-52">
+              {tabs.map(tab => (
+                <label
+                  key={tab.tabId}
+                  className="flex items-center gap-2 p-2 hover:bg-blue-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={tab.selected}
+                    onChange={() => toggleTabSelection(tab.tabId)}
+                    className="flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <TabFavicon url={tab.favIconUrl} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-medium text-blue-900 truncate">
+                      {tab.title}
+                    </div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {tab.url}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Active Tools Bar */}
+      <ActiveToolsBar
+        onAddTools={() => setShowToolPicker(true)}
+        onToolsChange={handleToolsChange}
+      />
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -884,6 +1015,12 @@ export const ChatView: React.FC = () => {
           onClose={() => setShowFileAnalysis(false)}
         />
       )}
+
+      {/* Tool Picker Modal */}
+      <ToolPickerModal
+        isOpen={showToolPicker}
+        onClose={() => setShowToolPicker(false)}
+      />
     </div>
   );
 };

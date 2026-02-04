@@ -69,6 +69,25 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+/**
+ * Custom context rule for tool detection
+ */
+export interface CustomContextRule {
+  id: string;
+  clientId: string;
+  patterns: string[];
+  domainHints: string[];
+  createdAt: number;
+}
+
+/**
+ * Tool session preferences (persisted)
+ */
+export interface ToolSessionPreferences {
+  pinnedTools: string[];  // Client IDs that user has explicitly pinned
+  customRules: CustomContextRule[];  // User-defined context rules
+}
+
 export interface UserConfig {
   // Legacy fields (for backward compatibility)
   apiKey?: string;
@@ -88,6 +107,9 @@ export interface UserConfig {
   networkMonitoringLevel?: MonitoringLevel;
   extractJavaScript?: boolean; // For full-monitoring mode
   extractCSS?: boolean; // For full-monitoring mode
+
+  // Tool session preferences
+  toolSessionPreferences?: ToolSessionPreferences;
 
   // Token management
   tokenBalance: number;
@@ -144,13 +166,20 @@ interface AppState {
   addChatMessage: (message: ChatMessage) => void;
   clearChatMessages: () => void;
 
+  // Tool session preferences
+  pinTool: (clientId: string) => void;
+  unpinTool: (clientId: string) => void;
+  addCustomContextRule: (rule: CustomContextRule) => void;
+  removeCustomContextRule: (ruleId: string) => void;
+  getToolSessionPreferences: () => ToolSessionPreferences;
+
   setPopupOpen: (open: boolean) => void;
   addActiveWidget: (widget: SubExtension) => void;
   removeActiveWidget: (widgetId: string) => void;
   updateWidgetPosition: (widgetId: string, position: { x: number; y: number }) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   plans: [],
   activePlanId: null,
   clients: [],
@@ -337,6 +366,86 @@ export const useAppStore = create<AppState>((set) => ({
       },
     ],
   }),
+
+  pinTool: (clientId) => set((state) => {
+    const currentPrefs = state.userConfig.toolSessionPreferences || {
+      pinnedTools: [],
+      customRules: [],
+    };
+
+    if (currentPrefs.pinnedTools.includes(clientId)) {
+      return state; // Already pinned
+    }
+
+    return {
+      userConfig: {
+        ...state.userConfig,
+        toolSessionPreferences: {
+          ...currentPrefs,
+          pinnedTools: [...currentPrefs.pinnedTools, clientId],
+        },
+      },
+    };
+  }),
+
+  unpinTool: (clientId) => set((state) => {
+    const currentPrefs = state.userConfig.toolSessionPreferences || {
+      pinnedTools: [],
+      customRules: [],
+    };
+
+    return {
+      userConfig: {
+        ...state.userConfig,
+        toolSessionPreferences: {
+          ...currentPrefs,
+          pinnedTools: currentPrefs.pinnedTools.filter(id => id !== clientId),
+        },
+      },
+    };
+  }),
+
+  addCustomContextRule: (rule) => set((state) => {
+    const currentPrefs = state.userConfig.toolSessionPreferences || {
+      pinnedTools: [],
+      customRules: [],
+    };
+
+    return {
+      userConfig: {
+        ...state.userConfig,
+        toolSessionPreferences: {
+          ...currentPrefs,
+          customRules: [...currentPrefs.customRules, rule],
+        },
+      },
+    };
+  }),
+
+  removeCustomContextRule: (ruleId) => set((state) => {
+    const currentPrefs = state.userConfig.toolSessionPreferences || {
+      pinnedTools: [],
+      customRules: [],
+    };
+
+    return {
+      userConfig: {
+        ...state.userConfig,
+        toolSessionPreferences: {
+          ...currentPrefs,
+          customRules: currentPrefs.customRules.filter(r => r.id !== ruleId),
+        },
+      },
+    };
+  }),
+
+  getToolSessionPreferences: (): ToolSessionPreferences => {
+    const state = get();
+    return state.userConfig.toolSessionPreferences || {
+      pinnedTools: [],
+      customRules: [],
+    };
+  },
 
   addClient: (client) => set((state) => ({ clients: [...state.clients, client] })),
 
