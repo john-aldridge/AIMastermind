@@ -81,12 +81,13 @@ export const MONITORING_LEVELS: Record<MonitoringLevel, MonitoringConfig> = {
 
 export class NetworkMonitor {
   private isMonitoring = false;
-  private currentLevel: MonitoringLevel = 'filtering-only';
+  private levelByTab = new Map<number, MonitoringLevel>();
+  private defaultLevel: MonitoringLevel = 'filtering-only';
   private requests: NetworkRequest[] = [];
   private maxRequests = 100; // Keep last 100 requests
   private webRequestListener: any = null;
 
-  async setLevel(level: MonitoringLevel): Promise<{ success: boolean; error?: string }> {
+  async setLevel(level: MonitoringLevel, tabId?: number): Promise<{ success: boolean; error?: string }> {
     const config = MONITORING_LEVELS[level];
 
     // Check if we have required permissions
@@ -105,52 +106,86 @@ export class NetworkMonitor {
       }
     }
 
-    // Stop current monitoring
-    await this.stop();
+    if (tabId !== undefined) {
+      // Per-tab level setting
+      this.levelByTab.set(tabId, level);
+      this.broadcastLevelChange(level, tabId);
 
-    // Start new monitoring level
-    this.currentLevel = level;
+      // Start/update monitoring based on any active tab needing it
+      await this.updateMonitoringState();
+    } else {
+      // Setting default level for all new tabs
+      this.defaultLevel = level;
 
-    switch (level) {
-      case 'filtering-only':
-        // No webRequest monitoring, only declarativeNetRequest (which is always active)
-        // User can enable filtering rules separately in settings
-        break;
-      case 'api-monitoring':
-        await this.startAPIMonitoring();
-        break;
-      case 'full-monitoring':
-        await this.startFullMonitoring();
-        break;
+      // Broadcast to all tabs that don't have explicit setting
+      await this.broadcastDefaultLevelChange(level);
+      await this.updateMonitoringState();
     }
 
     return { success: true };
   }
 
-  private async startAPIMonitoring() {
-    if (!chrome.webRequest) {
-      console.error('webRequest API not available');
-      return;
+  /**
+   * Update the webRequest monitoring state based on current tab levels.
+   * If any tab needs api-monitoring or full-monitoring, we need the listener active.
+   */
+  private async updateMonitoringState() {
+    const needsMonitoring = this.needsActiveMonitoring();
+
+    if (needsMonitoring && !this.isMonitoring) {
+      // Start monitoring (full-monitoring captures all types, api-monitoring only xmlhttprequest)
+      // Use full-monitoring listener to capture everything, filtering happens per-tab
+      await this.startFullMonitoring();
+    } else if (!needsMonitoring && this.isMonitoring) {
+      // Stop monitoring - no tabs need it
+      await this.stop();
+    }
+  }
+
+  /**
+   * Check if any tab needs active monitoring
+   */
+  private needsActiveMonitoring(): boolean {
+    // Check if default level needs monitoring
+    if (this.defaultLevel !== 'filtering-only') {
+      return true;
     }
 
-    this.webRequestListener = (details: chrome.webRequest.WebResponseCacheDetails) => {
-      this.handleRequest({
-        url: details.url,
-        method: details.method,
-        type: details.type,
-        timestamp: details.timeStamp,
-        statusCode: (details as any).statusCode,
-        tabId: details.tabId
-      });
-    };
+    // Check if any tab has monitoring enabled
+    for (const level of this.levelByTab.values()) {
+      if (level !== 'filtering-only') {
+        return true;
+      }
+    }
 
-    chrome.webRequest.onCompleted.addListener(
-      this.webRequestListener,
-      { urls: ["<all_urls>"], types: ["xmlhttprequest"] }
-    );
+    return false;
+  }
 
-    this.isMonitoring = true;
-    console.log('API monitoring started');
+  private broadcastLevelChange(level: MonitoringLevel, tabId: number) {
+    chrome.tabs.sendMessage(tabId, {
+      type: 'MONITORING_LEVEL_CHANGED',
+      level: level
+    }).catch(() => {
+      // Ignore errors for tabs that don't have content script
+    });
+  }
+
+  private async broadcastDefaultLevelChange(level: MonitoringLevel) {
+    try {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (tab.id && !this.levelByTab.has(tab.id)) {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'MONITORING_LEVEL_CHANGED',
+            level: level
+          }).catch(() => {
+            // Ignore errors for tabs that don't have content script
+          });
+        }
+      }
+    } catch (error) {
+      console.error('[NetworkMonitor] Error broadcasting default level change:', error);
+    }
   }
 
   private async startFullMonitoring() {
@@ -204,8 +239,20 @@ export class NetworkMonitor {
     this.requests = [];
   }
 
-  getLevel(): MonitoringLevel {
-    return this.currentLevel;
+  getLevel(tabId?: number): MonitoringLevel {
+    if (tabId !== undefined && this.levelByTab.has(tabId)) {
+      return this.levelByTab.get(tabId)!;
+    }
+    return this.defaultLevel;
+  }
+
+  /**
+   * Remove the level setting for a specific tab (cleanup on tab close)
+   */
+  removeTabLevel(tabId: number) {
+    this.levelByTab.delete(tabId);
+    // Update monitoring state in case this was the only tab needing monitoring
+    this.updateMonitoringState();
   }
 
   isActive(): boolean {
@@ -228,6 +275,12 @@ export class NetworkMonitor {
 
   // Handle intercepted network data from content script
   handleInterceptedRequest(data: any, tabId?: number) {
+    // Skip if monitoring level for this tab is 'filtering-only' (no network observation)
+    const level = this.getLevel(tabId);
+    if (level === 'filtering-only') {
+      return;
+    }
+
     const request: NetworkRequest = {
       url: data.request.url,
       method: data.request.method,

@@ -8,6 +8,34 @@
 import type { ConfigField } from '../agents/AgentInterface';
 
 /**
+ * Agent execution mode
+ * - 'safe': Only declarative actions, no JS, no LLM
+ * - 'llm-assisted': Uses LLM for decisions but only executes whitelisted operations
+ * - 'unrestricted': Current behavior (requires JS settings enabled)
+ */
+export type AgentMode = 'safe' | 'llm-assisted' | 'unrestricted';
+
+/**
+ * LLM configuration for llm-assisted agents
+ */
+export interface LLMConfig {
+  systemPrompt?: string;                // Custom system prompt for LLM
+  allowedOperations: string[];          // Whitelist of BrowserClient operations
+  maxIterations?: number;               // Rate limiting for iterations (default: 5)
+  temperature?: number;                 // LLM temperature (default: 0)
+}
+
+/**
+ * Safe operation returned by LLM
+ */
+export interface SafeOperation {
+  operation: string;                    // e.g., "browser_remove_element"
+  parameters: Record<string, any>;      // Operation parameters
+  reason?: string;                      // Why this operation is needed
+  priority?: number;                    // Execution priority (lower = first)
+}
+
+/**
  * Top-level agent configuration
  */
 export interface AgentConfig {
@@ -20,6 +48,15 @@ export interface AgentConfig {
   icon?: string;
   homepage?: string;
   tags: string[];
+
+  // Source tracking
+  source?: 'user' | 'example' | 'purchased';  // Where this agent came from
+
+  // Execution mode
+  mode?: AgentMode;                     // Default: 'unrestricted' for backward compat
+
+  // LLM configuration (for llm-assisted mode)
+  llmConfig?: LLMConfig;
 
   // Security flags
   containsJavaScript?: boolean;         // True if config contains executeScript actions
@@ -97,6 +134,12 @@ export type Action =
 
   // Client Calls
   | CallClientAction
+
+  // LLM-Assisted Operations (safe mode)
+  | InspectPageAction
+  | AnalyzeWithLLMAction
+  | CallLLMForOperationsAction
+  | ExecuteSafeOperationsAction
 
   // Control Flow
   | IfAction
@@ -188,6 +231,49 @@ export interface ExecuteScriptAction {
   args?: string[];                      // Variable names to pass as arguments
   saveAs?: string;                      // Save return value to variable
   timeout?: number;                     // Optional timeout in ms
+}
+
+// LLM-Assisted Operations
+
+/**
+ * Inspect page using browser_inspect_page capability
+ */
+export interface InspectPageAction {
+  type: 'inspectPage';
+  findOverlays?: boolean;               // Look for overlays/modals (default: true)
+  saveAs?: string;                      // Save result to variable
+}
+
+/**
+ * Send data to LLM for analysis
+ */
+export interface AnalyzeWithLLMAction {
+  type: 'analyzeWithLLM';
+  context: string;                      // Variable name containing data to analyze
+  prompt: string;                       // Analysis prompt
+  saveAs?: string;                      // Save analysis result
+}
+
+/**
+ * Call LLM to get safe operations to execute
+ */
+export interface CallLLMForOperationsAction {
+  type: 'callLLMForOperations';
+  context: string;                      // Variable name containing page state
+  goal: string;                         // What to achieve (e.g., "Remove overlays blocking content")
+  allowedOperations?: string[];         // Override allowed operations from config
+  saveAs?: string;                      // Save operations array to variable
+}
+
+/**
+ * Execute validated safe operations from LLM
+ */
+export interface ExecuteSafeOperationsAction {
+  type: 'executeSafeOperations';
+  operations: string;                   // Variable name containing operations array
+  validateFirst?: boolean;              // Validate operations before execution (default: true)
+  stopOnError?: boolean;                // Stop if any operation fails (default: false)
+  saveAs?: string;                      // Save execution results
 }
 
 // Client Calls

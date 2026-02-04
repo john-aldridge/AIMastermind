@@ -39,8 +39,48 @@ initializeAPIService();
 // Initialize config-based architecture
 initializeConfigArchitecture();
 
+// Configure side panel for per-tab behavior
+if (chrome.sidePanel) {
+  // Disable panel globally by default - we'll enable per-tab when user clicks
+  chrome.sidePanel.setOptions({ enabled: false })
+    .then(() => console.log('Side panel disabled globally (will enable per-tab)'))
+    .catch((error) => console.error('Error disabling side panel globally:', error));
+
+  // Still allow icon click to trigger our handler
+  if (chrome.sidePanel.setPanelBehavior) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false })
+      .catch((error) => console.error('Error setting side panel behavior:', error));
+  }
+}
+
 // Track active agents per tab
 const activeAgentsPerTab = new Map<number, Set<string>>();
+
+// Track connected side panels for disconnect detection
+const connectedPanels = new Map<number, chrome.runtime.Port>();
+
+// Handle side panel connection/disconnection
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name.startsWith('sidepanel-')) {
+    const tabId = parseInt(port.name.split('-')[1]);
+    if (!isNaN(tabId)) {
+      connectedPanels.set(tabId, port);
+      console.log(`[Background] Side panel connected for tab ${tabId}`);
+
+      port.onDisconnect.addListener(() => {
+        connectedPanels.delete(tabId);
+        console.log(`[Background] Side panel disconnected for tab ${tabId}, turning off monitoring`);
+
+        // Turn off monitoring for this tab when panel closes
+        networkMonitor.setLevel('filtering-only', tabId);
+
+        // Disable the side panel for this tab so it doesn't show on tab switch
+        chrome.sidePanel.setOptions({ tabId, enabled: false })
+          .catch(() => {}); // Tab may already be closed
+      });
+    }
+  }
+});
 
 // Track page load history per tab (to detect reloads)
 interface TabLoadHistory {
@@ -212,7 +252,39 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   activeAgentsPerTab.delete(tabId);
   tabLoadHistory.delete(tabId);
-  console.log(`[Auto-Load] Cleaned up agents and history for closed tab ${tabId}`);
+  networkMonitor.removeTabLevel(tabId);
+  connectedPanels.delete(tabId);
+  console.log(`[Auto-Load] Cleaned up agents, history, monitoring level, and panel state for closed tab ${tabId}`);
+
+  // Notify sidepanel of tab removal
+  notifyTabChange();
+});
+
+/**
+ * Notify sidepanel of tab changes for auto-updating tab list
+ */
+const notifyTabChange = () => {
+  chrome.runtime.sendMessage({ type: MessageType.TAB_CHANGED }).catch(() => {
+    // Sidepanel might not be open, ignore error
+  });
+};
+
+// Listen for tab created events
+chrome.tabs.onCreated.addListener(() => {
+  notifyTabChange();
+});
+
+// Listen for tab activated (switched) events
+chrome.tabs.onActivated.addListener(() => {
+  notifyTabChange();
+});
+
+// Listen for tab updated events (URL, title, favicon changes)
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  // Only notify on meaningful changes (title, URL, favicon)
+  if (changeInfo.title || changeInfo.url || changeInfo.favIconUrl) {
+    notifyTabChange();
+  }
 });
 
 /**
@@ -279,14 +351,17 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 // Handle notification clicks
-chrome.notifications.onClicked.addListener((notificationId) => {
+chrome.notifications.onClicked.addListener(async (notificationId) => {
   if (notificationId.startsWith('download-')) {
-    // Open side panel to analyze the download
-    chrome.windows.getCurrent((window) => {
-      if (window.id && chrome.sidePanel) {
-        chrome.sidePanel.open({ windowId: window.id });
+    // Open side panel for the active tab to analyze the download
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.id && chrome.sidePanel) {
+        await chrome.sidePanel.open({ tabId: activeTab.id });
       }
-    });
+    } catch (error) {
+      console.error('Error opening side panel from notification:', error);
+    }
 
     // Clear the notification
     chrome.notifications.clear(notificationId);
@@ -300,22 +375,22 @@ setTimeout(async () => {
   await chrome.action.setPopup({ popup: '' });
 }, 500);
 
-// Handle extension icon click - only fires when popup is disabled (side panel mode)
-chrome.action.onClicked.addListener(async (tab) => {
-  console.log('Extension icon clicked, opening side panel...');
-  try {
-    if (chrome.sidePanel && chrome.sidePanel.open) {
-      if (tab.windowId) {
-        await chrome.sidePanel.open({ windowId: tab.windowId });
-        console.log('✅ Side panel opened successfully');
-      } else {
-        console.error('❌ No windowId available');
-      }
-    } else {
-      console.error('❌ chrome.sidePanel API not available');
-    }
-  } catch (error) {
-    console.error('❌ Error opening side panel:', error);
+// Handle extension icon click - opens side panel for this specific tab only
+chrome.action.onClicked.addListener((tab) => {
+  console.log('Extension icon clicked, opening side panel for tab:', tab.id);
+  if (chrome.sidePanel && chrome.sidePanel.open && tab.id) {
+    // Set options and open synchronously - both must be in user gesture context
+    // (using await breaks the user gesture chain and causes open() to fail)
+    chrome.sidePanel.setOptions({
+      tabId: tab.id,
+      path: 'src/sidepanel/index.html',
+      enabled: true
+    });
+    chrome.sidePanel.open({ tabId: tab.id })
+      .then(() => console.log('✅ Side panel opened for tab', tab.id))
+      .catch((error) => console.error('❌ Error opening side panel:', error));
+  } else {
+    console.error('❌ chrome.sidePanel API not available or no tabId');
   }
 });
 
@@ -401,6 +476,14 @@ async function handleMessage(
 
     case MessageType.GET_NETWORK_REQUESTS:
       return handleGetNetworkRequests(message.payload);
+
+    case MessageType.GET_MONITORING_LEVEL:
+      // Return level for the specific tab if sender is a content script
+      const monitoringTabId = sender?.tab?.id;
+      return { success: true, data: networkMonitor.getLevel(monitoringTabId) };
+
+    case MessageType.SET_MONITORING_LEVEL:
+      return handleSetMonitoringLevel(message.payload);
 
     case MessageType.GET_ACTIVE_AGENTS:
       return handleGetActiveAgents(message.payload);
@@ -555,6 +638,19 @@ async function handleCheckAutoLoadRules(payload: any): Promise<MessageResponse> 
     }
     await checkAndActivateAutoLoadRules(tabId, url);
     return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleSetMonitoringLevel(payload: any): Promise<MessageResponse> {
+  try {
+    const { level, tabId } = payload;
+    if (!level) {
+      return { success: false, error: 'Level is required' };
+    }
+    const result = await networkMonitor.setLevel(level, tabId);
+    return result;
   } catch (error) {
     return { success: false, error: String(error) };
   }

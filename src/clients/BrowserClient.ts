@@ -390,14 +390,18 @@ export class BrowserClient extends APIClientBase {
   static async executeInPageContext(
     script: string,
     args: any[] = [],
-    _timeout: number = 5000 // Reserved for future use
+    _timeout: number = 5000, // Reserved for future use
+    targetTabId?: number
   ): Promise<any> {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tabs[0]?.id) {
-      throw new Error('No active tab found');
-    }
+    let tabId = targetTabId;
 
-    const tabId = tabs[0].id;
+    if (!tabId) {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tabs[0]?.id) {
+        throw new Error('No active tab found');
+      }
+      tabId = tabs[0].id;
+    }
 
     // Execute in MAIN world to bypass CSP and access page context
     // We pass the script as a string and evaluate it in the page context
@@ -1128,7 +1132,7 @@ export class BrowserClient extends APIClientBase {
   }
 
   /**
-   * Inspect page to find elements (especially overlays/modals)
+   * Inspect page to find elements (especially overlays/modals) and blur effects
    */
   private async inspectPage(_params: any): Promise<any> {
     console.log('[BrowserClient] Inspecting page for elements');
@@ -1153,6 +1157,46 @@ export class BrowserClient extends APIClientBase {
           text: string;
         }> = [];
 
+        // Track blur effects and scroll blocking
+        const blurEffects: Array<{
+          selector: string;
+          filter: string;
+          element: string;
+        }> = [];
+
+        const scrollBlocking: Array<{
+          selector: string;
+          overflow: string;
+          element: string;
+        }> = [];
+
+        // Check body and html for blur/scroll issues
+        const checkElement = (el: Element, selector: string) => {
+          const styles = window.getComputedStyle(el);
+
+          // Check for blur filter
+          if (styles.filter && styles.filter !== 'none' && styles.filter.includes('blur')) {
+            blurEffects.push({
+              selector,
+              filter: styles.filter,
+              element: el.tagName.toLowerCase(),
+            });
+          }
+
+          // Check for scroll blocking
+          if (styles.overflow === 'hidden' || styles.overflowY === 'hidden') {
+            scrollBlocking.push({
+              selector,
+              overflow: styles.overflow || styles.overflowY,
+              element: el.tagName.toLowerCase(),
+            });
+          }
+        };
+
+        // Check body and html specifically
+        checkElement(document.body, 'body');
+        checkElement(document.documentElement, 'html');
+
         // Find all elements with position fixed or absolute and high z-index
         const allElements = document.querySelectorAll('*');
         allElements.forEach((el) => {
@@ -1161,6 +1205,24 @@ export class BrowserClient extends APIClientBase {
           const zIndex = styles.zIndex;
           const display = styles.display;
           const visibility = styles.visibility;
+
+          // Check for blur on any element
+          if (styles.filter && styles.filter !== 'none' && styles.filter.includes('blur')) {
+            const classList = Array.from(el.classList);
+            const id = el.id;
+            let selector = el.tagName.toLowerCase();
+            if (id) selector = `#${id}`;
+            else if (classList.length > 0) selector = `.${classList[0]}`;
+
+            // Avoid duplicates
+            if (!blurEffects.some(b => b.selector === selector)) {
+              blurEffects.push({
+                selector,
+                filter: styles.filter,
+                element: el.tagName.toLowerCase(),
+              });
+            }
+          }
 
           // Look for overlays: fixed/absolute position with high z-index
           if (
@@ -1215,10 +1277,16 @@ export class BrowserClient extends APIClientBase {
 
         return {
           overlays: elements,
+          blurEffects: blurEffects,
+          scrollBlocking: scrollBlocking,
           total: elements.length,
-          message: elements.length > 0
-            ? `Found ${elements.length} potential overlay/modal elements`
-            : 'No overlay elements found',
+          hasBlur: blurEffects.length > 0,
+          hasScrollBlocking: scrollBlocking.length > 0,
+          message: [
+            elements.length > 0 ? `Found ${elements.length} potential overlay/modal elements` : 'No overlay elements found',
+            blurEffects.length > 0 ? `Found ${blurEffects.length} elements with blur effects` : null,
+            scrollBlocking.length > 0 ? `Found ${scrollBlocking.length} elements blocking scroll` : null,
+          ].filter(Boolean).join('. '),
         };
       },
       args: [],

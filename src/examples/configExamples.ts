@@ -17,28 +17,15 @@ export const OverlayRemoverAgentConfig: AgentConfig = {
   id: 'overlay-remover',
   name: 'Overlay Remover',
   description: 'Removes annoying overlay popups, modals, and paywalls from web pages',
-  version: '1.0.0',
+  version: '2.0.0',
   author: 'Synergy AI',
   icon: '🚫',
   tags: ['dom-manipulation', 'user-experience', 'productivity'],
-  containsJavaScript: false,
+  source: 'example',
+  containsJavaScript: true,
   requiresPageAccess: true,
 
-  configFields: [
-    {
-      key: 'aggressive_mode',
-      label: 'Aggressive Mode',
-      type: 'select',
-      required: true,
-      default: 'normal',
-      options: [
-        { value: 'normal', label: 'Normal - Remove obvious overlays' },
-        { value: 'aggressive', label: 'Aggressive - Remove all suspicious elements' },
-      ],
-      helpText: 'How aggressively to remove overlays',
-    },
-  ],
-
+  configFields: [],
   dependencies: [],
 
   capabilities: [
@@ -48,55 +35,241 @@ export const OverlayRemoverAgentConfig: AgentConfig = {
       parameters: [],
       actions: [
         {
-          type: 'if',
-          condition: {
-            type: 'equals',
-            left: '{{config.aggressive_mode}}',
-            right: 'aggressive',
-          },
-          then: [
-            {
-              type: 'querySelectorAll',
-              selector: '.modal, .popup, .overlay, [class*="overlay"], [class*="modal"], [class*="popup"], [style*="position: fixed"], [style*="z-index"]',
-              saveAs: 'overlays',
-            },
-          ],
-          else: [
-            {
-              type: 'querySelectorAll',
-              selector: '.modal-overlay, .popup-overlay, .paywall-overlay, [class*="overlay"][style*="fixed"]',
-              saveAs: 'overlays',
-            },
-          ],
-        },
-        {
-          type: 'forEach',
-          source: 'overlays',
-          itemAs: 'overlay',
-          do: [
-            {
-              type: 'remove',
-              target: 'overlay',
-            },
-          ],
-        },
-        {
-          type: 'addStyle',
-          target: 'body',
-          styles: {
-            overflow: 'auto',
-          },
+          type: 'executeScript',
+          script: `
+            // Comprehensive overlay removal
+            let removed = 0;
+
+            // Selectors for common overlay/modal elements
+            const selectors = [
+              // Generic modal/overlay classes
+              '[class*="modal"]',
+              '[class*="Modal"]',
+              '[class*="overlay"]',
+              '[class*="Overlay"]',
+              '[class*="popup"]',
+              '[class*="Popup"]',
+              '[class*="dialog"]',
+              '[class*="Dialog"]',
+              '[class*="backdrop"]',
+              '[class*="Backdrop"]',
+              // Common specific classes
+              '.modal', '.popup', '.overlay', '.dialog', '.backdrop',
+              '.lightbox', '.interstitial', '.paywall',
+              // Fixed/fullscreen positioned elements (likely overlays)
+              '[style*="position: fixed"][style*="z-index"]',
+              '[style*="position:fixed"][style*="z-index"]',
+              // Data attributes often used for modals
+              '[data-modal]', '[data-overlay]', '[data-popup]',
+              '[role="dialog"]', '[role="alertdialog"]',
+              // Cookie consent and newsletter popups
+              '[class*="cookie"]', '[class*="Cookie"]',
+              '[class*="consent"]', '[class*="Consent"]',
+              '[class*="newsletter"]', '[class*="Newsletter"]',
+              '[class*="subscribe"]', '[class*="Subscribe"]',
+            ];
+
+            // Find and remove overlay elements
+            selectors.forEach(selector => {
+              try {
+                document.querySelectorAll(selector).forEach(el => {
+                  const style = window.getComputedStyle(el);
+                  const isOverlay =
+                    style.position === 'fixed' ||
+                    style.position === 'absolute' ||
+                    parseInt(style.zIndex) > 100 ||
+                    style.display === 'flex' && el.children.length <= 3;
+
+                  // Only remove if it looks like an overlay (not main content)
+                  if (isOverlay || el.matches('[role="dialog"], [role="alertdialog"], [data-modal], [data-overlay]')) {
+                    el.remove();
+                    removed++;
+                  }
+                });
+              } catch (e) {
+                // Ignore invalid selectors
+              }
+            });
+
+            // Remove blur effects from body and html
+            document.body.style.overflow = 'auto';
+            document.body.style.filter = 'none';
+            document.body.style.pointerEvents = 'auto';
+            document.documentElement.style.overflow = 'auto';
+
+            // Find and fix any blurred containers
+            document.querySelectorAll('*').forEach(el => {
+              const style = window.getComputedStyle(el);
+              if (style.filter && style.filter !== 'none' && style.filter.includes('blur')) {
+                el.style.filter = 'none';
+              }
+              // Remove overflow hidden that blocks scrolling
+              if (style.overflow === 'hidden' && (el === document.body || el === document.documentElement)) {
+                el.style.overflow = 'auto';
+              }
+            });
+
+            // Remove any lingering backdrop elements
+            document.querySelectorAll('[class*="backdrop"], [class*="Backdrop"]').forEach(el => {
+              el.remove();
+              removed++;
+            });
+
+            return { removed, success: true };
+          `,
+          saveAs: 'result',
         },
         {
           type: 'notify',
           title: 'Overlays Removed',
-          message: 'Removed overlay elements from page',
+          message: 'Cleaned up overlay elements from page',
+        },
+        {
+          type: 'return',
+          value: '{{result}}',
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * Smart Overlay Remover Agent - LLM-Assisted (no JavaScript)
+ *
+ * This agent uses the LLM to intelligently identify and remove overlays.
+ * It only uses whitelisted, safe BrowserClient operations.
+ */
+export const SmartOverlayRemoverAgentConfig: AgentConfig = {
+  id: 'smart-overlay-remover',
+  name: 'Smart Overlay Remover',
+  description: 'Intelligently removes overlays, modals, and paywalls using AI analysis, then translates the page to English. No JavaScript required.',
+  version: '1.2.0',
+  author: 'Synergy AI',
+  icon: '🧠',
+  tags: ['dom-manipulation', 'user-experience', 'ai-powered', 'safe'],
+  source: 'example',
+
+  // LLM-assisted mode - uses AI but only executes safe operations
+  mode: 'llm-assisted',
+  containsJavaScript: false,
+  requiresPageAccess: true,
+
+  // LLM configuration
+  llmConfig: {
+    systemPrompt: `You are a browser automation expert that helps remove annoying overlays and modals from web pages.
+
+When analyzing page state, look for:
+- Elements with high z-index (usually overlays)
+- Fixed/absolute positioned elements covering content
+- Elements with classes containing: modal, overlay, popup, dialog, backdrop, cookie, consent, paywall, adblock
+- Elements that block scrolling or have blur effects
+
+IMPORTANT: Also check for and remove blur effects! Many sites blur the background when showing overlays.
+- Use browser_modify_style with selector "body" or "html" and styles {"filter": "none", "overflow": "auto"}
+- Also try selectors like "main", "#content", ".content", or other main content containers
+
+For each overlay found, determine the best selector to remove it.
+Prefer more specific selectors (IDs, specific classes) over generic ones.
+
+Always include these operations if overlays are found:
+1. Remove the overlay elements
+2. Remove blur effects from body/html/main content (use browser_modify_style)
+3. Restore scroll functionality`,
+    allowedOperations: [
+      'browser_remove_element',
+      'browser_modify_style',
+      'browser_restore_scroll',
+    ],
+    maxIterations: 5,
+    temperature: 0,
+  },
+
+  configFields: [],
+  dependencies: [],
+
+  capabilities: [
+    {
+      name: 'smart_remove_overlays',
+      description: 'Intelligently detect and remove overlay elements using AI analysis, then translate the page to English',
+      parameters: [],
+      actions: [
+        // Step 1: Inspect the page to find potential overlays
+        {
+          type: 'inspectPage',
+          findOverlays: true,
+          saveAs: 'pageState',
+        },
+        // Step 2: Ask LLM to determine which operations to execute
+        {
+          type: 'callLLMForOperations',
+          context: 'pageState',
+          goal: 'Remove all overlay elements that are blocking page content. Include modals, popups, cookie banners, paywalls, adblock detectors, and any backdrop/scrim elements. ALSO remove any blur effects on body, html, or main content containers using browser_modify_style with {"filter": "none"}. Restore scrolling if it has been disabled.',
+          saveAs: 'operations',
+        },
+        // Step 3: Execute the validated operations
+        {
+          type: 'executeSafeOperations',
+          operations: 'operations',
+          validateFirst: true,
+          stopOnError: false,
+          saveAs: 'results',
+        },
+        // Step 4: Translate the page to English
+        {
+          type: 'translatePage',
+          targetLanguage: 'en',
+          fallbackStrategy: 'native-then-llm',
+        },
+        // Step 5: Notify user of results
+        {
+          type: 'if',
+          condition: {
+            type: 'greaterThan',
+            left: 'results.successful',
+            right: 0,
+          },
+          then: [
+            {
+              type: 'notify',
+              title: 'Page Cleaned & Translated',
+              message: 'Removed overlays and translated page to English',
+            },
+          ],
+          else: [
+            {
+              type: 'notify',
+              title: 'Page Translated',
+              message: 'No overlays found, but page translated to English',
+            },
+          ],
+        },
+        {
+          type: 'return',
+          value: '{{results}}',
+        },
+      ],
+    },
+    {
+      name: 'analyze_page_only',
+      description: 'Analyze the page for overlays without removing them (preview mode)',
+      parameters: [],
+      actions: [
+        {
+          type: 'inspectPage',
+          findOverlays: true,
+          saveAs: 'pageState',
+        },
+        {
+          type: 'analyzeWithLLM',
+          context: 'pageState',
+          prompt: 'Analyze these page elements and identify which ones appear to be overlays, modals, or popups that might be blocking content. For each one, explain why you think it is an overlay and suggest how to remove it.',
+          saveAs: 'analysis',
         },
         {
           type: 'return',
           value: {
-            success: true,
-            message: 'Overlays removed successfully',
+            pageState: '{{pageState}}',
+            analysis: '{{analysis}}',
           },
         },
       ],
@@ -115,6 +288,7 @@ export const PriceExtractorAgentConfig: AgentConfig = {
   author: 'Synergy AI',
   icon: '💰',
   tags: ['scraping', 'e-commerce', 'price-tracking'],
+  source: 'example',
   containsJavaScript: true,
   requiresPageAccess: true,
 
@@ -358,6 +532,7 @@ export const GitHubClientConfig: ClientConfig = {
 export const ExampleConfigs = {
   agents: [
     OverlayRemoverAgentConfig,
+    SmartOverlayRemoverAgentConfig,
     PriceExtractorAgentConfig,
   ],
   clients: [

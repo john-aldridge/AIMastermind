@@ -17,12 +17,18 @@ import {
   Condition,
   Transform,
   ExecuteScriptAction,
+  SafeOperation,
+  InspectPageAction,
+  AnalyzeWithLLMAction,
+  CallLLMForOperationsAction,
+  ExecuteSafeOperationsAction,
 } from '../types/agentConfig';
 import { BrowserClient } from '../clients/BrowserClient';
 import { SettingsService } from './settingsService';
 import { ConfigRegistry } from './configRegistry';
 import { APIService } from '../utils/api';
 import { useAppStore } from '../state/appStore';
+import { OperationValidator } from './operationValidator';
 
 /**
  * Execution context for an agent capability
@@ -30,13 +36,17 @@ import { useAppStore } from '../state/appStore';
 class ExecutionContext {
   private variables: Map<string, any> = new Map();
   private userConfig: Record<string, any>;
+  public readonly tabId?: number;
+  public readonly agentConfig: AgentConfig;
 
   constructor(
-    _config: AgentConfig,
+    config: AgentConfig,
     parameters: Record<string, any>,
     userConfig: Record<string, any>
   ) {
+    this.agentConfig = config;
     this.userConfig = userConfig;
+    this.tabId = userConfig.tabId;
 
     // Initialize context with parameters
     for (const [key, value] of Object.entries(parameters)) {
@@ -70,7 +80,28 @@ class ExecutionContext {
    */
   resolveValue(value: any): any {
     if (typeof value === 'string') {
-      // Replace {{varName}} with variable value
+      // Check if the entire string is a single variable reference like "{{varName}}"
+      // In this case, return the raw value (including objects) instead of converting to string
+      const singleVarMatch = value.match(/^\{\{([^}]+)\}\}$/);
+      if (singleVarMatch) {
+        const trimmed = singleVarMatch[1].trim();
+
+        // Handle config references: {{config.fieldName}}
+        if (trimmed.startsWith('config.')) {
+          const fieldName = trimmed.substring(7);
+          return this.userConfig[fieldName] ?? value;
+        }
+
+        // Handle parameter/variable references - return raw value
+        if (this.hasVariable(trimmed)) {
+          const varValue = this.getVariable(trimmed);
+          return varValue !== undefined ? varValue : value;
+        }
+
+        return value;
+      }
+
+      // For strings with embedded variables, replace and stringify
       return value.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
         const trimmed = varName.trim();
 
@@ -228,6 +259,19 @@ export class AgentEngine {
       case 'executeScript':
         return await this.executeScript(action);
 
+      // LLM-Assisted Operations
+      case 'inspectPage':
+        return await this.executeInspectPage(action as InspectPageAction);
+
+      case 'analyzeWithLLM':
+        return await this.executeAnalyzeWithLLM(action as AnalyzeWithLLMAction);
+
+      case 'callLLMForOperations':
+        return await this.executeCallLLMForOperations(action as CallLLMForOperationsAction);
+
+      case 'executeSafeOperations':
+        return await this.executeValidatedOperations(action as ExecuteSafeOperationsAction);
+
       // Client Calls
       case 'callClient':
         return await this.executeCallClient(action);
@@ -302,7 +346,7 @@ export class AgentEngine {
     const selector = this.context!.resolveValue(action.selector);
     const result = await BrowserClient.executeInPageContext(`
       return document.querySelector('${selector}');
-    `);
+    `, [], 5000, this.context!.tabId);
 
     if (action.saveAs) {
       this.context!.setVariable(action.saveAs, result);
@@ -320,7 +364,7 @@ export class AgentEngine {
         id: el.id,
         className: el.className
       }));
-    `);
+    `, [], 5000, this.context!.tabId);
 
     if (action.saveAs) {
       this.context!.setVariable(action.saveAs, result);
@@ -345,7 +389,7 @@ export class AgentEngine {
           return true;
         }
         return false;
-      `);
+      `, [], 5000, this.context!.tabId);
     }
   }
 
@@ -357,32 +401,55 @@ export class AgentEngine {
       ? this.context!.getVariable(target)
       : target;
 
+    // Helper to remove a single element object
+    const removeElementObject = async (item: any) => {
+      if (item.id) {
+        await BrowserClient.executeInPageContext(`
+          const el = document.getElementById('${item.id}');
+          if (el) el.remove();
+        `, [], 5000, this.context!.tabId);
+      } else if (item.className && typeof item.className === 'string' && item.className.trim()) {
+        const firstClass = item.className.split(' ').filter((c: string) => c.trim())[0];
+        if (firstClass) {
+          await BrowserClient.executeInPageContext(`
+            const el = document.querySelector('.${firstClass}');
+            if (el) el.remove();
+          `, [], 5000, this.context!.tabId);
+        }
+      } else if (item.tagName) {
+        // Fallback: try to remove by tag name (less precise but better than nothing)
+        await BrowserClient.executeInPageContext(`
+          const el = document.querySelector('${item.tagName.toLowerCase()}');
+          if (el) el.remove();
+        `, [], 5000, this.context!.tabId);
+      }
+    };
+
     // If target is an array of elements, remove all
     if (Array.isArray(targetValue)) {
-      // For arrays of element references, we need to remove by selector
-      // This is a limitation of the serialization approach
       for (const item of targetValue) {
-        if (item.id) {
-          await BrowserClient.executeInPageContext(`
-            const el = document.getElementById('${item.id}');
-            if (el) el.remove();
-          `);
-        } else if (item.className) {
-          await BrowserClient.executeInPageContext(`
-            const el = document.querySelector('.${item.className.split(' ')[0]}');
-            if (el) el.remove();
-          `);
-        }
+        await removeElementObject(item);
       }
       return true;
     }
 
-    // Single selector
-    return await BrowserClient.executeInPageContext(`
-      const elements = document.querySelectorAll('${targetValue}');
-      elements.forEach(el => el.remove());
-      return elements.length;
-    `);
+    // If target is a single element object (from forEach iteration)
+    if (typeof targetValue === 'object' && targetValue !== null && (targetValue.id || targetValue.className || targetValue.tagName)) {
+      await removeElementObject(targetValue);
+      return true;
+    }
+
+    // Single selector string
+    if (typeof targetValue === 'string') {
+      return await BrowserClient.executeInPageContext(`
+        const elements = document.querySelectorAll('${targetValue}');
+        elements.forEach(el => el.remove());
+        return elements.length;
+      `, [], 5000, this.context!.tabId);
+    }
+
+    console.warn('[AgentEngine] executeRemove: Invalid target value', targetValue);
+    return false;
   }
 
   private async executeSetAttribute(action: any): Promise<any> {
@@ -397,7 +464,7 @@ export class AgentEngine {
         return true;
       }
       return false;
-    `);
+    `, [], 5000, this.context!.tabId);
   }
 
   private async executeGetAttribute(action: any): Promise<any> {
@@ -407,7 +474,7 @@ export class AgentEngine {
     const result = await BrowserClient.executeInPageContext(`
       const el = document.querySelector('${target}');
       return el ? el.getAttribute('${attr}') : null;
-    `);
+    `, [], 5000, this.context!.tabId);
 
     if (action.saveAs) {
       this.context!.setVariable(action.saveAs, result);
@@ -422,7 +489,7 @@ export class AgentEngine {
     const result = await BrowserClient.executeInPageContext(`
       const el = document.querySelector('${target}');
       return el ? el.textContent : null;
-    `);
+    `, [], 5000, this.context!.tabId);
 
     if (action.saveAs) {
       this.context!.setVariable(action.saveAs, result);
@@ -444,7 +511,7 @@ export class AgentEngine {
         return true;
       }
       return false;
-    `);
+    `, [], 5000, this.context!.tabId);
   }
 
   private async executeAddStyle(action: any): Promise<any> {
@@ -458,7 +525,7 @@ export class AgentEngine {
         Object.assign(el.style, styles);
       });
       return elements.length;
-    `);
+    `, [], 5000, this.context!.tabId);
   }
 
   // JavaScript Execution
@@ -479,7 +546,8 @@ export class AgentEngine {
     const result = await BrowserClient.executeInPageContext(
       action.script,
       args,
-      action.timeout
+      action.timeout,
+      this.context!.tabId
     );
 
     // Save result if specified
@@ -488,6 +556,263 @@ export class AgentEngine {
     }
 
     return result;
+  }
+
+  // LLM-Assisted Operations
+
+  /**
+   * Execute inspectPage action - wraps browser_inspect_page capability
+   */
+  private async executeInspectPage(action: InspectPageAction): Promise<any> {
+    const browserClient = new BrowserClient();
+
+    const result = await browserClient.executeCapability(
+      'browser_inspect_page',
+      { find_overlays: action.findOverlays ?? true }
+    );
+
+    if (action.saveAs) {
+      this.context!.setVariable(action.saveAs, result.data);
+    }
+
+    return result.data;
+  }
+
+  /**
+   * Execute analyzeWithLLM action - sends data to LLM for analysis
+   */
+  private async executeAnalyzeWithLLM(action: AnalyzeWithLLMAction): Promise<any> {
+    const contextData = this.context!.getVariable(action.context);
+    const prompt = this.context!.resolveValue(action.prompt);
+
+    // Get LLM configuration
+    const apiService = this.getConfiguredAPIService();
+
+    const systemPrompt = this.context!.agentConfig.llmConfig?.systemPrompt ||
+      'You are an assistant that analyzes web page data. Provide concise, actionable analysis.';
+
+    const response = await apiService.generateContent({
+      prompt: `${prompt}\n\nContext data:\n${JSON.stringify(contextData, null, 2)}`,
+      systemPrompt,
+      maxTokens: 2048,
+    }, this.isUsingOwnKey());
+
+    if (action.saveAs) {
+      this.context!.setVariable(action.saveAs, response.content);
+    }
+
+    return response.content;
+  }
+
+  /**
+   * Execute callLLMForOperations action - LLM returns structured operations
+   */
+  private async executeCallLLMForOperations(action: CallLLMForOperationsAction): Promise<any> {
+    const contextData = this.context!.getVariable(action.context);
+    const goal = this.context!.resolveValue(action.goal);
+
+    // Get allowed operations from action or agent config
+    const allowedOps = action.allowedOperations ||
+      this.context!.agentConfig.llmConfig?.allowedOperations ||
+      OperationValidator.getSafeOperations();
+
+    // Build prompt for LLM
+    const systemPrompt = `You are a browser automation assistant. You analyze page state and return structured operations to achieve user goals.
+
+IMPORTANT: You can ONLY return operations from this whitelist:
+${allowedOps.map(op => `- ${op}`).join('\n')}
+
+Return ONLY a JSON array of operations. Each operation MUST have this exact structure:
+{
+  "operation": "<operation_name>",
+  "parameters": {
+    "selector": "<CSS selector>",
+    ... other parameters as needed
+  },
+  "reason": "<why this operation is needed>",
+  "priority": <number, lower = execute first>
+}
+
+CRITICAL: The "parameters" field must be an object containing the operation's parameters.
+- browser_remove_element requires: { "selector": "...", "all": true/false }
+- browser_modify_style requires: { "selector": "...", "styles": { "property": "value" } }
+- browser_restore_scroll requires: {} (empty object)
+
+Example response:
+[
+  {
+    "operation": "browser_remove_element",
+    "parameters": { "selector": ".modal-overlay", "all": true },
+    "reason": "Remove modal overlay blocking content",
+    "priority": 1
+  }
+]
+
+Do NOT return JavaScript code. Only return the JSON array.
+If no operations are needed, return: []`;
+
+    const userPrompt = `Goal: ${goal}
+
+Page State:
+${JSON.stringify(contextData, null, 2)}
+
+Return the operations needed to achieve the goal as a JSON array.`;
+
+    // Get configured LLM
+    const apiService = this.getConfiguredAPIService();
+    const temperature = this.context!.agentConfig.llmConfig?.temperature ?? 0;
+
+    const response = await apiService.generateContent({
+      prompt: userPrompt,
+      systemPrompt,
+      maxTokens: 2048,
+      temperature,
+    }, this.isUsingOwnKey());
+
+    // Parse operations from response
+    console.log('[AgentEngine] Raw LLM response:', response.content);
+    const operations = OperationValidator.parseOperationsFromResponse(response.content);
+    console.log('[AgentEngine] Parsed operations:', JSON.stringify(operations, null, 2));
+
+    if (action.saveAs) {
+      this.context!.setVariable(action.saveAs, operations);
+    }
+
+    return operations;
+  }
+
+  /**
+   * Execute validated safe operations from LLM
+   */
+  private async executeValidatedOperations(action: ExecuteSafeOperationsAction): Promise<any> {
+    const operations = this.context!.getVariable(action.operations) as SafeOperation[];
+    const validateFirst = action.validateFirst ?? true;
+    const stopOnError = action.stopOnError ?? false;
+
+    if (!Array.isArray(operations)) {
+      throw new Error(`Operations variable "${action.operations}" is not an array`);
+    }
+
+    // Create validator with allowed operations from config
+    const allowedOps = this.context!.agentConfig.llmConfig?.allowedOperations;
+    const validator = new OperationValidator(allowedOps);
+
+    // Validate all operations first if requested
+    if (validateFirst) {
+      const validationResult = validator.validateOperations(operations);
+      if (!validationResult.valid) {
+        console.warn('[AgentEngine] Some operations failed validation:', validationResult.errors);
+        if (validationResult.validOperations.length === 0) {
+          throw new Error(`All operations failed validation: ${validationResult.errors.join('; ')}`);
+        }
+      }
+
+      // Use only validated operations
+      return await this.executeSafeOperations(
+        validationResult.validOperations,
+        stopOnError,
+        action.saveAs
+      );
+    }
+
+    // Execute without pre-validation (validate each individually)
+    return await this.executeSafeOperations(operations, stopOnError, action.saveAs);
+  }
+
+  /**
+   * Execute a list of safe operations
+   */
+  private async executeSafeOperations(
+    operations: SafeOperation[],
+    stopOnError: boolean,
+    saveAs?: string
+  ): Promise<any> {
+    // Use BrowserClient directly for safe operations
+    const browserClient = new BrowserClient();
+    const results: Array<{ operation: string; success: boolean; result?: any; error?: string }> = [];
+
+    for (const op of operations) {
+      try {
+        console.log(`[AgentEngine] Executing safe operation: ${op.operation}`, op.parameters);
+
+        const result = await browserClient.executeCapability(
+          op.operation,
+          op.parameters
+        );
+
+        console.log(`[AgentEngine] Operation ${op.operation} result:`, result);
+
+        results.push({
+          operation: op.operation,
+          success: result.success,
+          result: result.data,
+          error: result.error,
+        });
+
+        if (!result.success && stopOnError) {
+          break;
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[AgentEngine] Operation ${op.operation} failed:`, errorMsg);
+
+        results.push({
+          operation: op.operation,
+          success: false,
+          error: errorMsg,
+        });
+
+        if (stopOnError) {
+          break;
+        }
+      }
+    }
+
+    const finalResult = {
+      totalOperations: operations.length,
+      executed: results.length,
+      successful: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      results,
+    };
+
+    if (saveAs) {
+      this.context!.setVariable(saveAs, finalResult);
+    }
+
+    return finalResult;
+  }
+
+  /**
+   * Get configured API service for LLM calls
+   */
+  private getConfiguredAPIService(): APIService {
+    const appState = useAppStore.getState();
+    const { userConfig } = appState;
+    const activeConfigId = userConfig.activeConfigurationId || 'free-model';
+    const activeConfig = userConfig.savedConfigurations.find((c: any) => c.id === activeConfigId);
+
+    if (!activeConfig) {
+      throw new Error('No active LLM configuration found');
+    }
+
+    const apiService = new APIService();
+    const provider = activeConfig.providerId === 'anthropic' ||
+                     activeConfig.providerId === 'our-models' ? 'claude' : 'openai';
+
+    apiService.setProvider(provider);
+    apiService.setModel(activeConfig.model);
+    apiService.setApiKey(activeConfig.credentials.apiKey || '');
+
+    return apiService;
+  }
+
+  /**
+   * Check if using own API key
+   */
+  private isUsingOwnKey(): boolean {
+    const appState = useAppStore.getState();
+    return appState.userConfig?.useOwnKey || false;
   }
 
   // Client Calls
@@ -570,7 +895,7 @@ export class AgentEngine {
     while (Date.now() - startTime < timeout) {
       const exists = await BrowserClient.executeInPageContext(`
         return document.querySelector('${selector}') !== null;
-      `);
+      `, [], 5000, this.context!.tabId);
 
       if (exists) {
         return true;
@@ -654,12 +979,17 @@ export class AgentEngine {
     const title = this.context!.resolveValue(action.title);
     const message = this.context!.resolveValue(action.message);
 
-    await chrome.notifications.create({
-      type: 'basic',
-      iconUrl: chrome.runtime.getURL('icon128.png'),
-      title,
-      message,
-    });
+    try {
+      await chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon128.svg'),
+        title,
+        message,
+      });
+    } catch (error) {
+      // Notification failed (possibly due to icon loading issue), log but don't fail the agent
+      console.warn('[AgentEngine] Notification failed:', error);
+    }
 
     return undefined;
   }
@@ -901,7 +1231,7 @@ Return only the translated lines in the same format (ID|||translated_text).`;
       })();
     `;
 
-    return await BrowserClient.executeInPageContext(script, [], 5000);
+    return await BrowserClient.executeInPageContext(script, [], 5000, this.context?.tabId);
   }
 
   // Process Management

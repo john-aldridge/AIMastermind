@@ -4,6 +4,7 @@ import { ChatView } from './components/ChatView';
 import { AgentsView } from './components/AgentsView';
 import { ClientsView } from './components/ClientsView';
 import { SettingsView } from './components/SettingsView';
+import { EditorApp } from '../editor/EditorApp';
 import { sendToBackground } from '@/utils/messaging';
 import { MessageType } from '@/utils/messaging';
 import { apiService } from '@/utils/api';
@@ -11,12 +12,30 @@ import { networkMonitor } from '@/utils/networkMonitor';
 import { registerAllClients } from '@/clients';
 import { registerAllAgents } from '@/agents';
 
-type View = 'chat' | 'agents' | 'clients' | 'settings';
+type View = 'chat' | 'agents' | 'clients' | 'settings' | 'editor';
+type AgentsViewTab = 'my-agents' | 'purchased' | 'sample-agents';
 
 export const SidePanelApp: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [editorAgentId, setEditorAgentId] = useState<string | null>(null);
+  const [editorIsNew, setEditorIsNew] = useState(false);
+  const [agentsViewTab, setAgentsViewTab] = useState<AgentsViewTab>('purchased');
   const { plans, userConfig, updateUserConfig, chatMessages } = useAppStore();
+
+  // Function to open editor in sidepanel
+  const openEditorInSidepanel = (agentId: string | null, isNew: boolean = false) => {
+    setEditorAgentId(agentId);
+    setEditorIsNew(isNew);
+    setCurrentView('editor');
+  };
+
+  // Function to close editor and return to agents view
+  const closeEditor = () => {
+    setEditorAgentId(null);
+    setEditorIsNew(false);
+    setCurrentView('agents');
+  };
 
   useEffect(() => {
     // Register all built-in clients and agents
@@ -164,7 +183,11 @@ export const SidePanelApp: React.FC = () => {
         {currentView === 'chat' && <ChatView />}
         {currentView === 'agents' && (
           <div className="overflow-auto flex-1">
-            <AgentsView />
+            <AgentsView
+              onOpenEditor={openEditorInSidepanel}
+              activeTab={agentsViewTab}
+              onTabChange={setAgentsViewTab}
+            />
           </div>
         )}
         {currentView === 'clients' && (
@@ -176,6 +199,14 @@ export const SidePanelApp: React.FC = () => {
           <div className="overflow-auto flex-1">
             <SettingsView />
           </div>
+        )}
+        {currentView === 'editor' && (
+          <EditorApp
+            mode="embedded"
+            agentId={editorAgentId}
+            isNew={editorIsNew}
+            onClose={closeEditor}
+          />
         )}
       </div>
     </div>

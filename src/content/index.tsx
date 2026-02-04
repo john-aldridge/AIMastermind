@@ -6,27 +6,59 @@ import { javascriptExtractor } from './javascriptExtractor';
 import { cssExtractor } from './cssExtractor';
 import { initializeProcessRegistry, getProcessRegistry } from '@/utils/processRegistry';
 
-// Inject network interceptor into page context
+// Track monitoring state
+let interceptorInjected = false;
+let shouldForwardNetworkData = false;
+
+// Inject network interceptor into page context (only when needed)
 const injectInterceptor = () => {
+  if (interceptorInjected) return; // Already injected
+
   try {
     const script = document.createElement('script');
     const interceptorUrl = chrome.runtime.getURL('content/interceptor.js');
 
-    console.log('%c[Synergy AI] Attempting to inject interceptor from:', interceptorUrl, 'background: #607D8B; color: white; padding: 2px 5px; border-radius: 3px;');
-
     script.src = interceptorUrl;
     script.onload = () => {
-      console.log('%c[Synergy AI] Network interceptor injected and loaded successfully', 'background: #4CAF50; color: white; padding: 2px 5px; border-radius: 3px;');
+      console.log('%c[Synergy AI] Network interceptor injected (API monitoring enabled)', 'background: #4CAF50; color: white; padding: 2px 5px; border-radius: 3px;');
       script.remove(); // Clean up
+      interceptorInjected = true;
     };
     script.onerror = (error) => {
-      console.error('%c[Synergy AI] Failed to load network interceptor - this may be due to Content Security Policy (CSP) restrictions', 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;', error);
+      console.error('%c[Synergy AI] Failed to load network interceptor - CSP may be blocking it', 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;', error);
     };
     (document.head || document.documentElement).appendChild(script);
   } catch (error) {
     console.error('%c[Synergy AI] Error injecting interceptor script:', error, 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;');
   }
 };
+
+// Check if monitoring level requires network interception
+const levelRequiresInterception = (level: string) => {
+  return level === 'api-monitoring' || level === 'full-monitoring';
+};
+
+// Initialize monitoring state based on current level
+const initializeMonitoringState = async () => {
+  try {
+    if (!chrome.runtime?.id) return;
+    const response = await chrome.runtime.sendMessage({
+      type: MessageType.GET_MONITORING_LEVEL
+    });
+    if (response?.success && response.data) {
+      const level = response.data;
+      shouldForwardNetworkData = levelRequiresInterception(level);
+      if (shouldForwardNetworkData) {
+        injectInterceptor();
+      }
+    }
+  } catch (err) {
+    // Silently ignore - extension context may be invalidated
+  }
+};
+
+// Initialize on load
+initializeMonitoringState();
 
 // Listen for intercepted network data from page context
 window.addEventListener('message', (event) => {
@@ -36,6 +68,11 @@ window.addEventListener('message', (event) => {
   }
 
   if (event.data.type === 'NETWORK_INTERCEPTED') {
+    // Skip if monitoring level doesn't require network data
+    if (!shouldForwardNetworkData) {
+      return;
+    }
+
     const data = event.data.data;
 
     // Check if extension context is still valid
@@ -45,17 +82,7 @@ window.addEventListener('message', (event) => {
       return;
     }
 
-    // Safe logging with type checking
-    try {
-      const requestType = typeof data.type === 'string' ? data.type.toUpperCase() : 'UNKNOWN';
-      const method = data.request?.method || 'UNKNOWN';
-      const url = data.request?.url || 'UNKNOWN';
-      console.log(`%c[Synergy AI] Intercepted ${requestType} request: ${method} ${url}`, 'background: #2196F3; color: white; padding: 2px 5px; border-radius: 3px;');
-    } catch (err) {
-      console.error('[Synergy AI] Error logging intercepted request:', err, data);
-    }
-
-    // Forward to background script
+    // Forward to background script (no verbose logging)
     chrome.runtime.sendMessage({
       type: MessageType.NETWORK_DATA_INTERCEPTED,
       payload: data
@@ -76,6 +103,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   try {
+    // Handle monitoring level changes
+    if (message.type === MessageType.MONITORING_LEVEL_CHANGED) {
+      const level = message.level;
+      const wasForwarding = shouldForwardNetworkData;
+      shouldForwardNetworkData = levelRequiresInterception(level);
+
+      // Inject interceptor if we just enabled monitoring and haven't injected yet
+      if (shouldForwardNetworkData && !interceptorInjected) {
+        injectInterceptor();
+      }
+
+      if (wasForwarding !== shouldForwardNetworkData) {
+        console.log(`%c[Synergy AI] Network monitoring ${shouldForwardNetworkData ? 'enabled' : 'disabled'}`,
+          `background: ${shouldForwardNetworkData ? '#4CAF50' : '#FF9800'}; color: white; padding: 2px 5px; border-radius: 3px;`);
+      }
+
+      sendResponse({ success: true });
+      return false;
+    }
+
     if (message.type === MessageType.EXTRACT_JAVASCRIPT) {
       console.log('[Content] Extracting JavaScript from page...');
 
@@ -207,8 +254,8 @@ const initializeContentScript = () => {
   // Initialize process registry for tracking long-running agent processes
   initializeProcessRegistry();
 
-  // Inject network interceptor first
-  injectInterceptor();
+  // Note: Network interceptor is injected on-demand when monitoring is enabled
+  // via MONITORING_LEVEL_CHANGED message or initializeMonitoringState()
 
   // Create root container
   const rootContainer = document.createElement('div');

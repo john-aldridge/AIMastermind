@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '@/state/appStore';
-import { networkMonitor, MONITORING_LEVELS, MonitoringLevel } from '@/utils/networkMonitor';
+import { MONITORING_LEVELS, MonitoringLevel } from '@/utils/networkMonitor';
 import { permissionManager } from '@/utils/permissions';
+import { sendToBackground, MessageType } from '@/utils/messaging';
 
 export const NetworkSettings: React.FC = () => {
   const { userConfig, updateUserConfig } = useAppStore();
@@ -9,31 +10,90 @@ export const NetworkSettings: React.FC = () => {
   const [isChanging, setIsChanging] = useState(false);
   const [grantedPermissions, setGrantedPermissions] = useState<string[]>([]);
   const [requestCount, setRequestCount] = useState(0);
+  const [currentTabId, setCurrentTabId] = useState<number | undefined>();
 
   useEffect(() => {
-    loadCurrentSettings();
+    // Get current tab ID on mount
+    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      if (tab?.id) {
+        setCurrentTabId(tab.id);
+        loadCurrentSettings(tab.id);
+
+        // Establish port for disconnect detection
+        // When side panel closes, background will detect and turn off monitoring
+        const port = chrome.runtime.connect({ name: `sidepanel-${tab.id}` });
+
+        // Sync current state to content script on mount
+        sendToBackground({
+          type: MessageType.GET_MONITORING_LEVEL,
+          payload: { tabId: tab.id }
+        }).then(response => {
+          if (response.success) {
+            // Broadcast to ensure content script is in sync
+            chrome.tabs.sendMessage(tab.id!, {
+              type: 'MONITORING_LEVEL_CHANGED',
+              level: response.data
+            }).catch(() => {
+              // Content script may not be ready yet, that's okay
+            });
+          }
+        });
+
+        // Cleanup port on unmount (though browser handles this automatically on panel close)
+        return () => {
+          port.disconnect();
+        };
+      }
+    });
 
     // Update request count every second when monitoring
-    const interval = setInterval(() => {
-      if (networkMonitor.isActive()) {
-        setRequestCount(networkMonitor.getRequests().length);
+    const interval = setInterval(async () => {
+      if (currentTabId) {
+        const response = await sendToBackground({
+          type: MessageType.GET_NETWORK_REQUESTS,
+          payload: { tabIds: currentTabId }
+        });
+        if (response.success && response.data) {
+          setRequestCount(response.data.length);
+        }
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [currentTabId]);
 
-  const loadCurrentSettings = async () => {
-    const level = userConfig.networkMonitoringLevel || networkMonitor.getLevel();
-    setCurrentLevel(level);
+  const loadCurrentSettings = async (tabId: number) => {
+    // Get the monitoring level for this specific tab from background
+    const response = await sendToBackground({
+      type: MessageType.GET_MONITORING_LEVEL,
+      payload: { tabId }
+    });
+
+    if (response.success && response.data) {
+      setCurrentLevel(response.data);
+    } else {
+      setCurrentLevel('filtering-only');
+    }
 
     const perms = await permissionManager.getGrantedPermissions();
     setGrantedPermissions(perms);
 
-    setRequestCount(networkMonitor.getRequests().length);
+    // Get request count for this tab
+    const requestsResponse = await sendToBackground({
+      type: MessageType.GET_NETWORK_REQUESTS,
+      payload: { tabIds: tabId }
+    });
+    if (requestsResponse.success && requestsResponse.data) {
+      setRequestCount(requestsResponse.data.length);
+    }
   };
 
   const handleLevelChange = async (newLevel: MonitoringLevel) => {
+    if (!currentTabId) {
+      console.error('No current tab ID available');
+      return;
+    }
+
     // Store previous level for potential revert
     const previousLevel = currentLevel;
 
@@ -54,7 +114,11 @@ export const NetworkSettings: React.FC = () => {
       }
     }
 
-    const result = await networkMonitor.setLevel(newLevel);
+    // Set level for this specific tab via background script
+    const result = await sendToBackground({
+      type: MessageType.SET_MONITORING_LEVEL,
+      payload: { level: newLevel, tabId: currentTabId }
+    });
 
     if (result.success) {
       // Confirm the selection
@@ -87,14 +151,17 @@ export const NetworkSettings: React.FC = () => {
     const removed = await permissionManager.removePermission(permission);
 
     if (removed) {
-      // Stop any active monitoring first
-      await networkMonitor.stop();
-
       // Reset to 'filtering-only' if current level requires this permission
-      if (willRevert) {
+      if (willRevert && currentTabId) {
         // Set UI state immediately
         setCurrentLevel('filtering-only');
         setRequestCount(0);
+
+        // Update via background script for this tab
+        await sendToBackground({
+          type: MessageType.SET_MONITORING_LEVEL,
+          payload: { level: 'filtering-only', tabId: currentTabId }
+        });
 
         // Update store
         updateUserConfig({ networkMonitoringLevel: 'filtering-only' });
@@ -106,20 +173,28 @@ export const NetworkSettings: React.FC = () => {
     }
   };
 
-  const handleClearRequests = () => {
-    networkMonitor.clearRequests();
+  const handleClearRequests = async () => {
+    // Note: clearRequests clears all requests, not just for current tab
+    // This is acceptable since clearing is a deliberate user action
+    await sendToBackground({
+      type: MessageType.GET_NETWORK_REQUESTS,
+      payload: { clear: true }
+    });
     setRequestCount(0);
   };
+
+  // Check if monitoring is active for this tab
+  const isMonitoringActive = currentLevel !== 'filtering-only';
 
   return (
     <div className="space-y-4">
       {/* Status Bar - Always visible to prevent layout shift */}
       <div className="flex items-center justify-end gap-2 min-h-[20px]">
-        {networkMonitor.isActive() ? (
+        {isMonitoringActive ? (
           <>
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-xs text-gray-600">Active</span>
+              <span className="text-xs text-gray-600">Active (this tab)</span>
             </div>
             <span className="text-xs text-gray-500">
               {requestCount} requests captured
@@ -135,7 +210,7 @@ export const NetworkSettings: React.FC = () => {
           </>
         ) : (
           <span className="text-xs text-gray-400 italic">
-            No monitoring active
+            No monitoring active for this tab
           </span>
         )}
       </div>

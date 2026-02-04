@@ -5,14 +5,8 @@ import * as monaco from 'monaco-editor';
 // Configure Monaco to use local files instead of CDN
 loader.config({ monaco });
 
-// Disable web workers to avoid CSP issues
-if (typeof window !== 'undefined') {
-  (window as any).MonacoEnvironment = {
-    getWorker() {
-      return null;
-    }
-  };
-}
+// Monaco workers are configured globally in EditorApp.tsx
+// They work in both editor and sidepanel contexts
 
 interface MonacoEditorProps {
   value: string;
@@ -31,24 +25,24 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 
-  const handleEditorDidMount = (editor: monaco.editor.IStandaloneCodeEditor, monaco: Monaco) => {
+  const handleEditorDidMount = (editor: monaco.editor.IStandaloneCodeEditor, monacoInstance: Monaco) => {
     editorRef.current = editor;
 
     // Configure TypeScript compiler options
-    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
-      target: monaco.languages.typescript.ScriptTarget.ES2020,
+    monacoInstance.languages.typescript.typescriptDefaults.setCompilerOptions({
+      target: monacoInstance.languages.typescript.ScriptTarget.ES2020,
       allowNonTsExtensions: true,
-      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-      module: monaco.languages.typescript.ModuleKind.ESNext,
+      moduleResolution: monacoInstance.languages.typescript.ModuleResolutionKind.NodeJs,
+      module: monacoInstance.languages.typescript.ModuleKind.ESNext,
       noEmit: true,
       esModuleInterop: true,
-      jsx: monaco.languages.typescript.JsxEmit.React,
+      jsx: monacoInstance.languages.typescript.JsxEmit.React,
       allowJs: true,
       typeRoots: ['node_modules/@types'],
     });
 
     // Add AgentBase type definitions
-    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    monacoInstance.languages.typescript.typescriptDefaults.addExtraLib(
       `
       declare module '../plugins/AgentBase' {
         export interface CapabilityParameter {
@@ -86,11 +80,67 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
     editor.addAction({
       id: 'format-document',
       label: 'Format Document',
-      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+      keybindings: [monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS],
       run: (ed) => {
         ed.getAction('editor.action.formatDocument')?.run();
       },
     });
+
+    // Custom edge-scroll handling for selection
+    const editorDomNode = editor.getDomNode();
+    if (editorDomNode) {
+      let isMouseDown = false;
+      let scrollInterval: number | null = null;
+
+      const startEdgeScroll = (direction: 'up' | 'down') => {
+        if (scrollInterval) return;
+        const scrollAmount = direction === 'down' ? 3 : -3;
+        scrollInterval = window.setInterval(() => {
+          editor.setScrollTop(editor.getScrollTop() + scrollAmount * 10);
+        }, 16); // ~60fps
+      };
+
+      const stopEdgeScroll = () => {
+        if (scrollInterval) {
+          clearInterval(scrollInterval);
+          scrollInterval = null;
+        }
+      };
+
+      editorDomNode.addEventListener('mousedown', () => {
+        isMouseDown = true;
+      });
+
+      window.addEventListener('mouseup', () => {
+        isMouseDown = false;
+        stopEdgeScroll();
+      });
+
+      editorDomNode.addEventListener('mousemove', (e: MouseEvent) => {
+        if (!isMouseDown) {
+          stopEdgeScroll();
+          return;
+        }
+
+        const rect = editorDomNode.getBoundingClientRect();
+        const edgeThreshold = 30; // pixels from edge to trigger scroll
+
+        if (e.clientY < rect.top + edgeThreshold) {
+          startEdgeScroll('up');
+        } else if (e.clientY > rect.bottom - edgeThreshold) {
+          startEdgeScroll('down');
+        } else {
+          stopEdgeScroll();
+        }
+      });
+
+      editorDomNode.addEventListener('mouseleave', () => {
+        if (isMouseDown) {
+          // Continue scrolling based on where mouse exited
+          // This is handled by the mousemove on parent elements
+        }
+      });
+    }
   };
 
   const handleEditorChange = (value: string | undefined) => {
@@ -109,16 +159,28 @@ export const MonacoEditor: React.FC<MonacoEditorProps> = ({
         minimap: { enabled: false },
         fontSize: 13,
         lineNumbers: 'on',
-        scrollBeyondLastLine: false,
+        scrollBeyondLastLine: true,
         automaticLayout: true,
         tabSize: 2,
-        wordWrap: 'on',
+        wordWrap: 'off',
         readOnly,
         contextmenu: true,
         quickSuggestions: true,
         suggestOnTriggerCharacters: true,
         acceptSuggestionOnEnter: 'on',
         snippetSuggestions: 'inline',
+        dragAndDrop: true,
+        smoothScrolling: false,
+        cursorSurroundingLines: 0,
+        mouseWheelScrollSensitivity: 2,
+        fastScrollSensitivity: 7,
+        scrollbar: {
+          vertical: 'visible',
+          horizontal: 'visible',
+          useShadows: false,
+          verticalScrollbarSize: 14,
+          horizontalScrollbarSize: 14,
+        },
       }}
     />
   );

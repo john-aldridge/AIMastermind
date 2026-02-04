@@ -22,25 +22,33 @@ export async function initializeConfigArchitecture(): Promise<void> {
     // Load configs from storage first
     await registry.initialize();
 
-    // Check if we need to load example configs (first-time setup)
-    const agentConfigs = await ConfigStorageService.listAgentConfigs();
-    const clientConfigs = await ConfigStorageService.listClientConfigs();
+    // Ensure example configs are available and up to date
+    const existingAgents = registry.listAgents();
+    const existingClients = registry.listClients();
 
-    if (agentConfigs.length === 0 && clientConfigs.length === 0) {
-      console.log('[ConfigInit] No configs found, loading examples...');
-
-      // Save example configs to storage
-      for (const config of ExampleConfigs.agents) {
+    // Add or update example agents (always update to latest version)
+    for (const config of ExampleConfigs.agents) {
+      const existing = existingAgents.find(a => a.id === config.id);
+      if (!existing) {
+        console.log(`[ConfigInit] Registering example agent: ${config.id}`);
+        await ConfigStorageService.saveAgentConfig(config);
+        registry.registerAgent(config);
+      } else if (existing.version !== config.version || existing.source !== 'example') {
+        // Update to latest version
+        console.log(`[ConfigInit] Updating example agent: ${config.id} to v${config.version}`);
         await ConfigStorageService.saveAgentConfig(config);
         registry.registerAgent(config);
       }
+    }
 
-      for (const config of ExampleConfigs.clients) {
+    // Add or update example clients
+    for (const config of ExampleConfigs.clients) {
+      const existing = existingClients.find(c => c.id === config.id);
+      if (!existing) {
+        console.log(`[ConfigInit] Registering example client: ${config.id}`);
         await ConfigStorageService.saveClientConfig(config);
         registry.registerClient(config);
       }
-
-      console.log('[ConfigInit] Loaded example configs');
     }
 
     console.log('[ConfigInit] Initialization complete');

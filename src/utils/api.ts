@@ -26,6 +26,7 @@ export interface AIRequest {
   model?: string;
   maxTokens?: number;
   systemPrompt?: string;
+  temperature?: number;                 // 0-1, lower = more deterministic (default: 1)
   tools?: ToolDefinition[];
   conversationHistory?: Array<{
     role: 'user' | 'assistant';
@@ -115,6 +116,7 @@ export class APIService {
         max_tokens: request.maxTokens || 4096,
         messages,
         ...(request.systemPrompt && { system: request.systemPrompt }),
+        ...(request.temperature !== undefined && { temperature: request.temperature }),
         ...(request.tools && request.tools.length > 0 && { tools: request.tools }),
       };
 
@@ -190,6 +192,7 @@ export class APIService {
         model: request.model || this.model,
         messages,
         max_tokens: request.maxTokens || 4096,
+        ...(request.temperature !== undefined && { temperature: request.temperature }),
         ...(tools && tools.length > 0 && { tools }),
       };
 

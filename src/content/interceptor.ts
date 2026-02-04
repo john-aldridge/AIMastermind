@@ -7,6 +7,13 @@
  */
 
 (function() {
+  // Prevent double injection
+  if ((window as any).__SYNERGY_INTERCEPTOR_INSTALLED__) {
+    console.log('[Interceptor] Already installed, skipping');
+    return;
+  }
+  (window as any).__SYNERGY_INTERCEPTOR_INSTALLED__ = true;
+
   console.log('[Interceptor] Network interceptor loaded');
 
   // Store original functions

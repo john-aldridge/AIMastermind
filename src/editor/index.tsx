@@ -3,13 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { EditorApp } from './EditorApp';
 import './index.css';
 
-// CRITICAL: Disable Monaco workers BEFORE any Monaco code loads
-// This prevents CSP violations and worker-related errors
-(window as any).MonacoEnvironment = {
-  getWorker() {
-    return null;
-  }
-};
+// Removed null MonacoEnvironment configuration
+// Proper configuration is in EditorApp.tsx
 
 const root = document.getElementById('root');
 if (root) {

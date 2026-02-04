@@ -16,6 +16,10 @@ export interface ExtensionSettings {
   warnBeforeExecutingJS: boolean;           // Default: true
   showJSSnippetsBeforeExecution: boolean;   // Default: true
 
+  // Safe mode controls
+  strictSafeMode: boolean;                  // Default: false - When true, only 'safe' mode agents allowed
+  allowLLMAssistedAgents: boolean;          // Default: true - Allow llm-assisted mode agents
+
   // Other settings can be added here
 }
 
@@ -26,6 +30,8 @@ const DEFAULT_SETTINGS: ExtensionSettings = {
   allowJavaScriptInConfigs: false,
   warnBeforeExecutingJS: true,
   showJSSnippetsBeforeExecution: true,
+  strictSafeMode: false,
+  allowLLMAssistedAgents: true,
 };
 
 /**
@@ -83,17 +89,42 @@ export class SettingsService {
   }
 
   /**
-   * Check if an agent config can be executed
+   * Check if an agent config can be executed based on its mode and settings
    */
   static async canExecuteAgentConfig(config: AgentConfig): Promise<{
     allowed: boolean;
     reason?: string;
   }> {
     const settings = await this.getSettings();
+    const mode = config.mode || 'unrestricted'; // Default to unrestricted for backward compat
 
-    // Check if config contains JavaScript
-    if (config.containsJavaScript) {
-      if (!settings.allowJavaScriptInConfigs) {
+    // If strict safe mode is enabled, only allow 'safe' mode agents
+    if (settings.strictSafeMode && mode !== 'safe') {
+      return {
+        allowed: false,
+        reason: `Strict safe mode is enabled. Only 'safe' mode agents are allowed. This agent uses '${mode}' mode.`,
+      };
+    }
+
+    // Check LLM-assisted agents
+    if (mode === 'llm-assisted' && !settings.allowLLMAssistedAgents) {
+      return {
+        allowed: false,
+        reason: 'LLM-assisted agents are disabled in settings. Enable them to run this agent.',
+      };
+    }
+
+    // Check if 'safe' mode agent contains JavaScript (shouldn't, but validate)
+    if (mode === 'safe' && config.containsJavaScript) {
+      return {
+        allowed: false,
+        reason: 'Safe mode agents cannot contain JavaScript. This agent is misconfigured.',
+      };
+    }
+
+    // For unrestricted mode or if config contains JavaScript, check JS settings
+    if (mode === 'unrestricted' || config.containsJavaScript) {
+      if (config.containsJavaScript && !settings.allowJavaScriptInConfigs) {
         return {
           allowed: false,
           reason: 'JavaScript execution is disabled in settings. Enable it in Settings to run this agent.',

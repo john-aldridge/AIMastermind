@@ -21,9 +21,6 @@
   "action": {
     "default_title": "Synergy AI"
   },
-  "side_panel": {
-    "default_path": "src/sidepanel/index.html"
-  },
   "background": {
     "service_worker": "background/index.js",
     "type": "module"

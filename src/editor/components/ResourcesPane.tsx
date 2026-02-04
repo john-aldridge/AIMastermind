@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { EXAMPLE_AGENTS } from '@/templates/exampleAgents';
 
-export type ResourceType = 'agent-code' | 'readme' | `example-${string}-code` | `example-${string}-readme`;
+export type ResourceType = 'agent-code' | 'readme';
 
 interface ResourcesPaneProps {
   selectedResource: ResourceType;
@@ -16,41 +15,29 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
   isCollapsed,
   onToggleCollapse,
 }) => {
-  const [expandedExamples, setExpandedExamples] = useState<Set<string>>(new Set());
   const [width, setWidth] = useState<number>(() => {
     // Load saved width from localStorage
     const saved = localStorage.getItem('resourcesPaneWidth');
     return saved ? parseInt(saved, 10) : 224; // Default 224px (w-56)
   });
   const [isDragging, setIsDragging] = useState(false);
-  const paneRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Save width to localStorage when it changes
   useEffect(() => {
     localStorage.setItem('resourcesPaneWidth', width.toString());
   }, [width]);
 
-  const toggleExample = (exampleId: string) => {
-    setExpandedExamples(prev => {
-      const next = new Set(prev);
-      if (next.has(exampleId)) {
-        next.delete(exampleId);
-      } else {
-        next.add(exampleId);
-      }
-      return next;
-    });
-  };
-
-  // Handle resize dragging
+  // Handle resize dragging - matches ResizablePanel pattern
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging || !paneRef.current) return;
+      if (!isDragging || !containerRef.current) return;
 
-      const newWidth = e.clientX;
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const newWidth = e.clientX - containerRect.left;
 
-      // Constrain between 150px (min) and 400px (max)
-      if (newWidth >= 150 && newWidth <= 400) {
+      // Constrain between 150px (min) and 500px (max)
+      if (newWidth >= 150 && newWidth <= 500) {
         setWidth(newWidth);
       }
     };
@@ -62,15 +49,11 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
     if (isDragging) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
     }
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
     };
   }, [isDragging]);
 
@@ -116,11 +99,12 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
   }
 
   return (
-    <div
-      ref={paneRef}
-      className="bg-gray-50 border-r border-gray-200 flex flex-col relative"
-      style={{ width: `${width}px`, minWidth: '150px', maxWidth: '400px' }}
-    >
+    <div ref={containerRef} className="flex flex-shrink-0">
+      {/* Pane Content */}
+      <div
+        className="bg-gray-50 flex flex-col"
+        style={{ width: `${width}px`, minWidth: '150px', maxWidth: '500px' }}
+      >
       <div className="p-2 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
         <span className="text-xs font-semibold text-gray-700 uppercase">Resources</span>
         <button
@@ -135,8 +119,8 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* My Agent Resources */}
-        <div className="border-b border-gray-200 pb-2 mb-4">
+        {/* Agent Resources */}
+        <div className="py-2">
           {resources.map((resource) => (
             <button
               key={resource.id}
@@ -154,113 +138,17 @@ export const ResourcesPane: React.FC<ResourcesPaneProps> = ({
             </button>
           ))}
         </div>
-
-        {/* Example Agents Section */}
-        <div className="pt-2">
-          <div className="px-3 py-2">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 uppercase">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-              Example Agents
-            </div>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Read-only examples
-            </p>
-          </div>
-
-          {EXAMPLE_AGENTS.map((example) => {
-            const isExpanded = expandedExamples.has(example.id);
-            const codeResourceId = `example-${example.id}-code` as ResourceType;
-            const readmeResourceId = `example-${example.id}-readme` as ResourceType;
-
-            return (
-              <div key={example.id} className="border-b border-gray-100 last:border-0">
-                {/* Example header */}
-                <button
-                  onClick={() => toggleExample(example.id)}
-                  className="w-full px-3 py-2 text-left text-sm flex items-center justify-between hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <svg
-                      className={`w-3 h-3 flex-shrink-0 text-gray-500 transition-transform ${
-                        isExpanded ? 'rotate-90' : ''
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                    <span className="text-gray-700 truncate font-medium">{example.name}</span>
-                  </div>
-                  <span
-                    className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-                      example.difficulty === 'beginner'
-                        ? 'bg-green-100 text-green-700'
-                        : example.difficulty === 'intermediate'
-                        ? 'bg-yellow-100 text-yellow-700'
-                        : 'bg-red-100 text-red-700'
-                    }`}
-                    title={example.difficulty.charAt(0).toUpperCase() + example.difficulty.slice(1)}
-                  >
-                    {example.difficulty[0].toUpperCase()}
-                  </span>
-                </button>
-
-                {/* Example files (when expanded) */}
-                {isExpanded && (
-                  <div className="bg-gray-100/50">
-                    <button
-                      onClick={() => onResourceSelect(readmeResourceId)}
-                      className={`w-full pl-8 pr-3 py-1.5 text-left text-xs flex items-center gap-2 transition-colors ${
-                        selectedResource === readmeResourceId
-                          ? 'bg-primary-100 text-primary-700 border-l-2 border-primary-600'
-                          : 'text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                        />
-                      </svg>
-                      <span className="truncate">README</span>
-                    </button>
-                    <button
-                      onClick={() => onResourceSelect(codeResourceId)}
-                      className={`w-full pl-8 pr-3 py-1.5 text-left text-xs flex items-center gap-2 transition-colors ${
-                        selectedResource === codeResourceId
-                          ? 'bg-primary-100 text-primary-700 border-l-2 border-primary-600'
-                          : 'text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                      </svg>
-                      <span className="truncate">Agent</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      </div>
       </div>
 
-      {/* Resize Handle */}
+      {/* Divider - flex sibling matching ResizablePanel pattern */}
       <div
         onMouseDown={handleMouseDown}
-        className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary-500 transition-colors ${
-          isDragging ? 'bg-primary-500' : 'bg-transparent'
+        className={`w-1 bg-gray-300 hover:bg-primary-500 cursor-col-resize flex-shrink-0 transition-colors ${
+          isDragging ? 'bg-primary-500' : ''
         }`}
         style={{ userSelect: 'none' }}
-        title="Drag to resize"
-      >
-        <div className="absolute inset-y-0 -left-1 -right-1" />
-      </div>
+      />
     </div>
   );
 };
