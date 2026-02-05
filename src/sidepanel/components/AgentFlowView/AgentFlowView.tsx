@@ -20,7 +20,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import type { AgentConfig } from '../../../types/agentConfig';
-import { parseAgentConfig, type FlowNodeData, type FlowNode } from './AgentFlowParser';
+import { parseAgentConfig, applyLayout, type FlowNodeData, type FlowNode, type NodeAINote } from './AgentFlowParser';
 import { convertFlowToConfig, validateFlow, createNewNode, type ValidationError } from './FlowToConfigConverter';
 import { BlockPalette } from './BlockPalette';
 import { BlockDetails } from './BlockDetails';
@@ -30,6 +30,7 @@ import { ActionNode } from './nodes/ActionNode';
 import { ConditionNode } from './nodes/ConditionNode';
 import { LoopNode } from './nodes/LoopNode';
 import { type BlockDefinition } from './blockDefinitions';
+import { generateNodeNote, generateAllNodeNotes } from './nodeNoteGenerator';
 
 // Custom node types - using 'any' to work around @xyflow/react's strict typing
 const nodeTypes: NodeTypes = {
@@ -43,6 +44,8 @@ interface AgentFlowViewProps {
   config: AgentConfig;
   onConfigChange: (config: AgentConfig) => void;
   onSave?: () => void;
+  onValidationChange?: (errors: ValidationError[]) => void;
+  onHasChangesChange?: (hasChanges: boolean) => void;
 }
 
 interface HistoryState {
@@ -57,6 +60,8 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
   config,
   onConfigChange,
   onSave,
+  onValidationChange,
+  onHasChangesChange,
 }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -67,19 +72,34 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
 
+  // AI Notes state
+  const [showNotes, setShowNotes] = useState(true);
+  const [nodeNotes, setNodeNotes] = useState<Map<string, NodeAINote>>(new Map());
+  const [regeneratingNodes, setRegeneratingNodes] = useState<Set<string>>(new Set());
+  const [isGeneratingNotes, setIsGeneratingNotes] = useState(false);
+
   // Undo/Redo history
   const [history, setHistory] = useState<HistoryState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const isUndoRedo = useRef(false);
-  const isInitialLoad = useRef(true);
+  // Store serialized initial state to compare against for change detection
+  const savedStateHash = useRef<string>('');
 
   // Ref for React Flow wrapper (for drag and drop)
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
+  // Helper to create a hash of the current flow state
+  const getStateHash = useCallback((n: Node[], e: Edge[]) => {
+    return JSON.stringify({
+      nodes: n.map(node => ({ id: node.id, type: node.type, data: node.data, position: node.position })),
+      edges: e.map(edge => ({ id: edge.id, source: edge.source, target: edge.target }))
+    });
+  }, []);
+
   // Initialize flow from config
   useEffect(() => {
-    isInitialLoad.current = true;
     const { nodes: parsedNodes, edges: parsedEdges } = parseAgentConfig(config);
+    savedStateHash.current = getStateHash(parsedNodes as Node[], parsedEdges);
     setNodes(parsedNodes as Node[]);
     setEdges(parsedEdges);
     setHasChanges(false);
@@ -87,7 +107,66 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
     // Initialize history
     setHistory([{ nodes: parsedNodes as Node[], edges: parsedEdges }]);
     setHistoryIndex(0);
-  }, [config.id]); // Re-parse when agent changes
+
+    // Initialize notes from parsed nodes (if they have persisted notes)
+    const initialNotes = new Map<string, NodeAINote>();
+    let nodesWithoutNotes = 0;
+    parsedNodes.forEach(node => {
+      if (node.data.aiNote) {
+        initialNotes.set(node.id, node.data.aiNote);
+      } else {
+        nodesWithoutNotes++;
+      }
+    });
+    setNodeNotes(initialNotes);
+
+    // Auto-generate notes for nodes that don't have them
+    if (nodesWithoutNotes > 0 && parsedNodes.length > 0) {
+      // Small delay to let the UI render first
+      const timeoutId = setTimeout(() => {
+        generateAllNodeNotes(
+          parsedNodes as FlowNode[],
+          parsedEdges,
+          true, // Use own API key
+          (completed, total) => {
+            console.log(`Auto-generating notes: ${completed}/${total}`);
+          }
+        ).then(newNotes => {
+          setNodeNotes(prev => {
+            const merged = new Map(prev);
+            newNotes.forEach((note, nodeId) => {
+              // Only add notes for nodes that don't already have one
+              if (!merged.has(nodeId)) {
+                merged.set(nodeId, note);
+              }
+            });
+            return merged;
+          });
+
+          // Update nodes with their new notes
+          setNodes(nds =>
+            nds.map(n => {
+              const note = newNotes.get(n.id);
+              if (note && !n.data.aiNote) {
+                return {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    aiNote: note,
+                  },
+                };
+              }
+              return n;
+            })
+          );
+        }).catch(err => {
+          console.error('Failed to auto-generate notes:', err);
+        });
+      }, 500);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [config.id, getStateHash]); // Re-parse when agent changes
 
   // Track changes and update history
   useEffect(() => {
@@ -100,29 +179,83 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
       return;
     }
 
-    // Skip the initial load - don't mark as changed or add to history
-    if (isInitialLoad.current) {
-      isInitialLoad.current = false;
+    // Compare current state to saved state to detect real changes
+    const currentHash = getStateHash(nodes, edges);
+    const hasRealChanges = currentHash !== savedStateHash.current;
+
+    if (!hasRealChanges) {
+      // State matches saved state - no unsaved changes
+      if (hasChanges) {
+        setHasChanges(false);
+      }
       return;
     }
 
     // Only track meaningful changes
-    if (nodes.length > 0) {
+    if (nodes.length > 0 && !hasChanges) {
       setHasChanges(true);
-
-      // Add to history (truncate any redo states)
-      const newHistory = history.slice(0, historyIndex + 1);
-      newHistory.push({ nodes: [...nodes], edges: [...edges] });
-
-      // Keep history manageable
-      if (newHistory.length > 50) {
-        newHistory.shift();
-      }
-
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
     }
-  }, [nodes, edges]);
+
+    // Add to history (truncate any redo states)
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push({ nodes: [...nodes], edges: [...edges] });
+
+    // Keep history manageable
+    if (newHistory.length > 50) {
+      newHistory.shift();
+    }
+
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  }, [nodes, edges, getStateHash]);
+
+  // Notify parent of validation errors changes
+  useEffect(() => {
+    onValidationChange?.(validationErrors);
+  }, [validationErrors, onValidationChange]);
+
+  // Notify parent of hasChanges changes
+  useEffect(() => {
+    onHasChangesChange?.(hasChanges);
+  }, [hasChanges, onHasChangesChange]);
+
+  // Track last node configs to detect changes for auto-regeneration
+  const lastNodeConfigs = useRef<Map<string, string>>(new Map());
+
+  // Debounced auto-regeneration of notes when node config changes
+  // Runs even when showNotes is off so notes are ready when toggled on
+  useEffect(() => {
+    // Find nodes whose config changed since last render
+    const changedNodeIds: string[] = [];
+    const newConfigMap = new Map<string, string>();
+
+    nodes.forEach(node => {
+      const configStr = JSON.stringify((node.data as FlowNodeData).config);
+      newConfigMap.set(node.id, configStr);
+
+      const lastConfig = lastNodeConfigs.current.get(node.id);
+      if (lastConfig && lastConfig !== configStr) {
+        changedNodeIds.push(node.id);
+      }
+    });
+
+    lastNodeConfigs.current = newConfigMap;
+
+    // Skip if no changes or if generating all notes
+    if (changedNodeIds.length === 0 || isGeneratingNotes) return;
+
+    // Debounce: wait 800ms before regenerating
+    const timeoutId = setTimeout(() => {
+      changedNodeIds.forEach(nodeId => {
+        const node = nodes.find(n => n.id === nodeId) as FlowNode | undefined;
+        if (node && !regeneratingNodes.has(nodeId)) {
+          handleRegenerateNote(nodeId);
+        }
+      });
+    }, 800);
+
+    return () => clearTimeout(timeoutId);
+  }, [nodes, isGeneratingNotes]);
 
   // Get available variables for autocomplete
   const availableVariables = useMemo(() => {
@@ -147,16 +280,61 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
     return map;
   }, [validationErrors]);
 
-  // Nodes with error info injected
-  const nodesWithErrors = useMemo(() => {
+  // Regenerate note for a single node (defined here for use in nodesWithData)
+  const handleRegenerateNote = useCallback(async (nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId) as FlowNode | undefined;
+    if (!node) return;
+
+    setRegeneratingNodes(prev => new Set(prev).add(nodeId));
+
+    try {
+      const note = await generateNodeNote(node, nodes as FlowNode[], edges);
+      setNodeNotes(prev => {
+        const newNotes = new Map(prev);
+        newNotes.set(nodeId, note);
+        return newNotes;
+      });
+
+      // Also update the node's data with the note
+      setNodes(nds =>
+        nds.map(n => {
+          if (n.id === nodeId) {
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                aiNote: note,
+              },
+            };
+          }
+          return n;
+        })
+      );
+    } catch (error) {
+      console.error('Failed to regenerate note:', error);
+    } finally {
+      setRegeneratingNodes(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(nodeId);
+        return newSet;
+      });
+    }
+  }, [nodes, edges, setNodes]);
+
+  // Nodes with error info and note data injected
+  const nodesWithData = useMemo(() => {
     return nodes.map(node => ({
       ...node,
       data: {
         ...node.data,
         errors: nodeErrorsMap.get(node.id) || [],
+        showNotes,
+        aiNote: nodeNotes.get(node.id) || node.data.aiNote,
+        isRegenerating: regeneratingNodes.has(node.id),
+        onRegenerateNote: () => handleRegenerateNote(node.id),
       },
     }));
-  }, [nodes, nodeErrorsMap]);
+  }, [nodes, nodeErrorsMap, showNotes, nodeNotes, regeneratingNodes, handleRegenerateNote]);
 
   // Handle edge connection
   const onConnect: OnConnect = useCallback(
@@ -323,6 +501,8 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
     try {
       const updatedConfig = convertFlowToConfig(nodes as FlowNode[], edges, config);
       onConfigChange(updatedConfig);
+      // Update saved state hash so current state is now considered "saved"
+      savedStateHash.current = getStateHash(nodes, edges);
       setHasChanges(false);
 
       if (onSave) {
@@ -333,7 +513,7 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
     } finally {
       setIsSaving(false);
     }
-  }, [nodes, edges, config, onConfigChange, onSave, validationErrors]);
+  }, [nodes, edges, config, onConfigChange, onSave, validationErrors, getStateHash]);
 
   // Add new capability
   const handleAddCapability = useCallback(() => {
@@ -366,6 +546,67 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
     setNodes((nds) => [...nds, newCapabilityNode as Node]);
   }, [nodes, setNodes]);
 
+
+  // Generate notes for all nodes
+  const handleGenerateAllNotes = useCallback(async () => {
+    setIsGeneratingNotes(true);
+
+    try {
+      const newNotes = await generateAllNodeNotes(
+        nodes as FlowNode[],
+        edges,
+        true,
+        (completed, total) => {
+          console.log(`Generated ${completed}/${total} notes`);
+        }
+      );
+
+      setNodeNotes(newNotes);
+
+      // Also update all nodes' data with their notes
+      setNodes(nds =>
+        nds.map(n => {
+          const note = newNotes.get(n.id);
+          if (note) {
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                aiNote: note,
+              },
+            };
+          }
+          return n;
+        })
+      );
+    } catch (error) {
+      console.error('Failed to generate all notes:', error);
+    } finally {
+      setIsGeneratingNotes(false);
+    }
+  }, [nodes, edges, setNodes]);
+
+  // Auto-layout nodes using dagre
+  const handleAutoLayout = useCallback(() => {
+    // Filter out data flow edges (animated) for layout calculation
+    const executionEdges = edges.filter(e => !e.animated);
+
+    // Apply dagre layout
+    const layoutedNodes = applyLayout(nodes as FlowNode[], executionEdges);
+
+    // Update nodes with new positions
+    setNodes(layoutedNodes as Node[]);
+
+    // Fit view after a short delay to let positions update
+    setTimeout(() => {
+      const reactFlowInstance = document.querySelector('.react-flow');
+      if (reactFlowInstance) {
+        // Trigger a fitView via the stored function isn't available here,
+        // but the layout change should be enough
+      }
+    }, 50);
+  }, [nodes, edges, setNodes]);
+
   return (
     <div className="h-full flex flex-col bg-gray-100">
       <div className="flex-1 flex overflow-hidden">
@@ -379,7 +620,7 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
         {/* Flow Canvas */}
         <div className="flex-1 relative" ref={reactFlowWrapper}>
           <ReactFlow
-            nodes={nodesWithErrors}
+            nodes={nodesWithData}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -426,16 +667,19 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
         isSaving={isSaving}
         validationErrors={validationErrors}
         onAddCapability={handleAddCapability}
+        showNotes={showNotes}
+        onToggleNotes={() => setShowNotes(!showNotes)}
+        onGenerateNotes={handleGenerateAllNotes}
+        isGeneratingNotes={isGeneratingNotes}
+        onAutoLayout={handleAutoLayout}
       />
     </div>
   );
 };
 
 // Wrap with ReactFlowProvider
-export const AgentFlowView: React.FC<AgentFlowViewProps> = (props) => {
-  return (
-    <ReactFlowProvider>
-      <AgentFlowViewInner {...props} />
-    </ReactFlowProvider>
-  );
-};
+export const AgentFlowView: React.FC<AgentFlowViewProps> = (props) => (
+  <ReactFlowProvider>
+    <AgentFlowViewInner {...props} />
+  </ReactFlowProvider>
+);

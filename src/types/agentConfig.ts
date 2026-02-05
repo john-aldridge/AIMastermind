@@ -170,62 +170,62 @@ export type Action =
   | ReturnAction;
 
 // DOM Actions
-export interface QuerySelectorAction {
+export interface QuerySelectorAction extends ActionWithNote {
   type: 'querySelector';
   selector: string;
   saveAs?: string;
 }
 
-export interface QuerySelectorAllAction {
+export interface QuerySelectorAllAction extends ActionWithNote {
   type: 'querySelectorAll';
   selector: string;
   saveAs?: string;
 }
 
-export interface ClickAction {
+export interface ClickAction extends ActionWithNote {
   type: 'click';
   target: string;
 }
 
-export interface RemoveAction {
+export interface RemoveAction extends ActionWithNote {
   type: 'remove';
   target: string;
 }
 
-export interface SetAttributeAction {
+export interface SetAttributeAction extends ActionWithNote {
   type: 'setAttribute';
   target: string;
   attr: string;
   value: string;
 }
 
-export interface GetAttributeAction {
+export interface GetAttributeAction extends ActionWithNote {
   type: 'getAttribute';
   target: string;
   attr: string;
   saveAs: string;
 }
 
-export interface GetTextAction {
+export interface GetTextAction extends ActionWithNote {
   type: 'getText';
   target: string;
   saveAs: string;
 }
 
-export interface SetValueAction {
+export interface SetValueAction extends ActionWithNote {
   type: 'setValue';
   target: string;
   value: string;
 }
 
-export interface AddStyleAction {
+export interface AddStyleAction extends ActionWithNote {
   type: 'addStyle';
   target: string;
   styles: Record<string, string>;
 }
 
 // JavaScript Execution
-export interface ExecuteScriptAction {
+export interface ExecuteScriptAction extends ActionWithNote {
   type: 'executeScript';
   script: string;                       // JavaScript code to execute
   args?: string[];                      // Variable names to pass as arguments
@@ -238,7 +238,7 @@ export interface ExecuteScriptAction {
 /**
  * Inspect page using browser_inspect_page capability
  */
-export interface InspectPageAction {
+export interface InspectPageAction extends ActionWithNote {
   type: 'inspectPage';
   findOverlays?: boolean;               // Look for overlays/modals (default: true)
   saveAs?: string;                      // Save result to variable
@@ -247,7 +247,7 @@ export interface InspectPageAction {
 /**
  * Send data to LLM for analysis
  */
-export interface AnalyzeWithLLMAction {
+export interface AnalyzeWithLLMAction extends ActionWithNote {
   type: 'analyzeWithLLM';
   context: string;                      // Variable name containing data to analyze
   prompt: string;                       // Analysis prompt
@@ -257,7 +257,7 @@ export interface AnalyzeWithLLMAction {
 /**
  * Call LLM to get safe operations to execute
  */
-export interface CallLLMForOperationsAction {
+export interface CallLLMForOperationsAction extends ActionWithNote {
   type: 'callLLMForOperations';
   context: string;                      // Variable name containing page state
   goal: string;                         // What to achieve (e.g., "Remove overlays blocking content")
@@ -268,7 +268,7 @@ export interface CallLLMForOperationsAction {
 /**
  * Execute validated safe operations from LLM
  */
-export interface ExecuteSafeOperationsAction {
+export interface ExecuteSafeOperationsAction extends ActionWithNote {
   type: 'executeSafeOperations';
   operations: string;                   // Variable name containing operations array
   validateFirst?: boolean;              // Validate operations before execution (default: true)
@@ -277,7 +277,7 @@ export interface ExecuteSafeOperationsAction {
 }
 
 // Client Calls
-export interface CallClientAction {
+export interface CallClientAction extends ActionWithNote {
   type: 'callClient';
   client: string;
   method: string;
@@ -286,88 +286,88 @@ export interface CallClientAction {
 }
 
 // Control Flow
-export interface IfAction {
+export interface IfAction extends ActionWithNote {
   type: 'if';
   condition: Condition;
   then: Action[];
   else?: Action[];
 }
 
-export interface ForEachAction {
+export interface ForEachAction extends ActionWithNote {
   type: 'forEach';
   source: string;
   itemAs: string;
   do: Action[];
 }
 
-export interface WhileAction {
+export interface WhileAction extends ActionWithNote {
   type: 'while';
   condition: Condition;
   do: Action[];
   maxIterations?: number;
 }
 
-export interface WaitAction {
+export interface WaitAction extends ActionWithNote {
   type: 'wait';
   ms: number;
 }
 
-export interface WaitForAction {
+export interface WaitForAction extends ActionWithNote {
   type: 'waitFor';
   selector: string;
   timeout?: number;
 }
 
 // Data Operations
-export interface SetVariableAction {
+export interface SetVariableAction extends ActionWithNote {
   type: 'set';
   variable: string;
   value: any;
 }
 
-export interface GetVariableAction {
+export interface GetVariableAction extends ActionWithNote {
   type: 'get';
   variable: string;
   saveAs: string;
 }
 
-export interface TransformAction {
+export interface TransformAction extends ActionWithNote {
   type: 'transform';
   source: string;
   transform: Transform;
   saveAs: string;
 }
 
-export interface MergeAction {
+export interface MergeAction extends ActionWithNote {
   type: 'merge';
   sources: string[];
   saveAs: string;
 }
 
 // Chrome APIs
-export interface StorageGetAction {
+export interface StorageGetAction extends ActionWithNote {
   type: 'storage.get';
   keys: string | string[];
   saveAs: string;
 }
 
-export interface StorageSetAction {
+export interface StorageSetAction extends ActionWithNote {
   type: 'storage.set';
   items: Record<string, any>;
 }
 
-export interface TabsCreateAction {
+export interface TabsCreateAction extends ActionWithNote {
   type: 'tabs.create';
   url: string;
 }
 
-export interface NotifyAction {
+export interface NotifyAction extends ActionWithNote {
   type: 'notify';
   title: string;
   message: string;
 }
 
-export interface TranslatePageAction {
+export interface TranslatePageAction extends ActionWithNote {
   type: 'translatePage';
   targetLanguage: string;              // ISO 639-1 language code (e.g., "en", "es", "fr")
   sourceLanguage?: string;             // Optional: auto-detect if not specified
@@ -377,27 +377,43 @@ export interface TranslatePageAction {
 }
 
 // Process Management
-export interface StartProcessAction {
+export interface StartProcessAction extends ActionWithNote {
   type: 'startProcess';
   processId: string;
   actions: Action[];
 }
 
-export interface StopProcessAction {
+export interface StopProcessAction extends ActionWithNote {
   type: 'stopProcess';
   processId: string;
 }
 
-export interface RegisterCleanupAction {
+export interface RegisterCleanupAction extends ActionWithNote {
   type: 'registerCleanup';
   processId: string;
   actions: Action[];
 }
 
 // Return/Exit
-export interface ReturnAction {
+export interface ReturnAction extends ActionWithNote {
   type: 'return';
   value: any;
+}
+
+/**
+ * AI-generated note for a node, persisted in agent config
+ */
+export interface AINote {
+  content: string;
+  configHash: string;  // Hash of node config to detect changes
+}
+
+/**
+ * Base action interface extension for AI notes
+ * All action types can have an optional _aiNote field
+ */
+export interface ActionWithNote {
+  _aiNote?: AINote;
 }
 
 /**

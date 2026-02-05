@@ -12,10 +12,15 @@ interface FlowToolbarProps {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
-  hasChanges: boolean;
   isSaving: boolean;
   validationErrors: ValidationError[];
   onAddCapability: () => void;
+  hasChanges: boolean;
+  showNotes?: boolean;
+  onToggleNotes?: () => void;
+  onGenerateNotes?: () => void;
+  isGeneratingNotes?: boolean;
+  onAutoLayout?: () => void;
 }
 
 export const FlowToolbar: React.FC<FlowToolbarProps> = ({
@@ -24,15 +29,18 @@ export const FlowToolbar: React.FC<FlowToolbarProps> = ({
   onRedo,
   canUndo,
   canRedo,
-  hasChanges,
   isSaving,
   validationErrors,
   onAddCapability,
+  hasChanges,
+  showNotes = false,
+  onToggleNotes,
+  onGenerateNotes,
+  isGeneratingNotes = false,
+  onAutoLayout,
 }) => {
   const { zoomIn, zoomOut, fitView, getZoom } = useReactFlow();
   const [zoom, setZoom] = React.useState(1);
-  const [showErrors, setShowErrors] = React.useState(false);
-  const errorsRef = React.useRef<HTMLDivElement>(null);
 
   // Update zoom display
   React.useEffect(() => {
@@ -41,17 +49,6 @@ export const FlowToolbar: React.FC<FlowToolbarProps> = ({
     }, 100);
     return () => clearInterval(interval);
   }, [getZoom]);
-
-  // Close errors dropdown when clicking outside
-  React.useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (errorsRef.current && !errorsRef.current.contains(event.target as Node)) {
-        setShowErrors(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-white border-t border-gray-200">
@@ -93,55 +90,55 @@ export const FlowToolbar: React.FC<FlowToolbarProps> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" />
           </svg>
         </button>
-      </div>
 
-      {/* Center: Validation Status */}
-      <div className="flex items-center gap-2">
-        {validationErrors.length > 0 ? (
-          <div className="relative" ref={errorsRef}>
+        {/* Notes Controls */}
+        {onToggleNotes && (
+          <>
+            <div className="w-px h-6 bg-gray-300 mx-2" />
+
+            {/* Toggle Notes */}
             <button
-              onClick={() => setShowErrors(!showErrors)}
-              className="flex items-center gap-1 text-red-600 text-sm px-2 py-1 rounded hover:bg-red-50 transition-colors cursor-pointer"
+              onClick={onToggleNotes}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                showNotes
+                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                  : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+              }`}
+              title={showNotes ? 'Hide AI Notes' : 'Show AI Notes'}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
-              <span>{validationErrors.length} error{validationErrors.length > 1 ? 's' : ''}</span>
-              <svg className={`w-3 h-3 transition-transform ${showErrors ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              {showNotes ? 'Hide Notes' : 'Show Notes'}
             </button>
-            {showErrors && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 max-h-60 overflow-y-auto bg-white border border-red-200 rounded-lg shadow-lg z-50">
-                <div className="p-2 border-b border-red-100 bg-red-50">
-                  <span className="text-sm font-medium text-red-800">Validation Errors</span>
-                </div>
-                <ul className="p-2 space-y-1">
-                  {validationErrors.map((error, index) => (
-                    <li key={index} className="flex items-start gap-2 text-sm text-red-700 bg-red-50 p-2 rounded">
-                      <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span>{error.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center gap-1 text-green-600 text-sm">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-            <span>Valid</span>
-          </div>
-        )}
 
-        {hasChanges && (
-          <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded">
-            Unsaved changes
-          </span>
+            {/* Generate All Notes */}
+            {showNotes && onGenerateNotes && (
+              <button
+                onClick={onGenerateNotes}
+                disabled={isGeneratingNotes}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="Generate AI notes for all nodes"
+              >
+                {isGeneratingNotes ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Generate All
+                  </>
+                )}
+              </button>
+            )}
+          </>
         )}
       </div>
 
@@ -182,6 +179,20 @@ export const FlowToolbar: React.FC<FlowToolbarProps> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
           </svg>
         </button>
+
+        {/* Auto Layout */}
+        {onAutoLayout && (
+          <button
+            onClick={onAutoLayout}
+            className="flex items-center gap-1 px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded transition-colors"
+            title="Auto-arrange nodes"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+            </svg>
+            Auto Layout
+          </button>
+        )}
 
         <div className="w-px h-6 bg-gray-300 mx-2" />
 

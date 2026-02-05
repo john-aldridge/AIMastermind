@@ -199,12 +199,12 @@ export const EDGE_STYLES = {
   },
 };
 
-// Node dimensions
+// Node dimensions - larger to accommodate integrated AI notes
 export const NODE_DIMENSIONS = {
-  width: 200,
-  height: 80,
+  width: 280,
+  height: 160,
   spacing: {
-    horizontal: 60,
-    vertical: 100,
+    horizontal: 80,
+    vertical: 150,
   },
 };

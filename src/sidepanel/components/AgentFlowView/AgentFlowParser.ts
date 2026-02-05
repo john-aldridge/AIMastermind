@@ -8,6 +8,14 @@ import { getCategoryForAction, getIconForAction, CATEGORY_COLORS } from './flowS
 import { NODE_DIMENSIONS } from './flowStyles';
 import dagre from 'dagre';
 
+export interface NodeAINote {
+  content: string;
+  generatedAt: string;
+  isLoading?: boolean;
+  error?: string;
+  configHash?: string;  // Hash of node config when note was generated
+}
+
 export interface FlowNodeData {
   actionType: string;
   category: keyof typeof CATEGORY_COLORS;
@@ -22,6 +30,10 @@ export interface FlowNodeData {
   loopBody?: boolean;
   parentId?: string;
   errors?: string[]; // Validation errors for this node
+  aiNote?: NodeAINote; // AI-generated note for this node
+  showNotes?: boolean; // Whether to show the AI note section
+  isRegenerating?: boolean; // Whether the note is being regenerated
+  onRegenerateNote?: () => void; // Callback to regenerate the note
   [key: string]: unknown; // Index signature to satisfy Record<string, unknown>
 }
 
@@ -145,6 +157,10 @@ function parseActionToNode(
   const category = getCategoryForAction(action.type);
   const icon = getIconForAction(action.type);
 
+  // Check if action has persisted AI note
+  const actionWithNote = action as Record<string, any>;
+  const persistedNote = actionWithNote._aiNote;
+
   return {
     id,
     type: 'action',
@@ -159,6 +175,14 @@ function parseActionToNode(
       config: action as Record<string, any>,
       capabilityName,
       parentId,
+      // Restore AI note from persisted config if available
+      ...(persistedNote && {
+        aiNote: {
+          content: persistedNote.content,
+          generatedAt: new Date().toISOString(),
+          configHash: persistedNote.configHash,
+        },
+      }),
     },
   };
 }
@@ -417,8 +441,10 @@ function parseCapability(capability: CapabilityConfig): { nodes: FlowNode[]; edg
   return { nodes, edges };
 }
 
-// Apply dagre layout to nodes
-function applyLayout(nodes: FlowNode[], edges: Edge[]): FlowNode[] {
+/**
+ * Apply dagre layout to nodes - exported for auto-layout feature
+ */
+export function applyLayout(nodes: FlowNode[], edges: Edge[]): FlowNode[] {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   dagreGraph.setGraph({

@@ -45,6 +45,14 @@ function nodeConfigToAction(node: FlowNode): Action {
     config.type = node.data.actionType;
   }
 
+  // Preserve AI note if present
+  if (node.data.aiNote?.content && node.data.aiNote?.configHash) {
+    config._aiNote = {
+      content: node.data.aiNote.content,
+      configHash: node.data.aiNote.configHash,
+    };
+  }
+
   return config as Action;
 }
 

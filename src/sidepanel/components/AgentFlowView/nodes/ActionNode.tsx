@@ -5,17 +5,77 @@
 import { memo, CSSProperties, useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { FlowNodeData } from '../AgentFlowParser';
-import { CATEGORY_COLORS } from '../flowStyles';
+import { CATEGORY_COLORS, NODE_DIMENSIONS } from '../flowStyles';
+import { InfoTooltip } from './InfoTooltip';
+import { getNodeDescription } from '../nodeDescriptions';
 
 interface ActionNodeProps {
   data: FlowNodeData;
   selected?: boolean;
 }
 
+// Inline note section component
+const NoteSection = memo(({
+  note,
+  isRegenerating,
+  onRegenerate,
+  textColor,
+}: {
+  note?: FlowNodeData['aiNote'];
+  isRegenerating?: boolean;
+  onRegenerate?: () => void;
+  textColor: string;
+}) => {
+  const isLoading = note?.isLoading || isRegenerating;
+
+  return (
+    <div className="border-t border-white/20 mt-2 pt-2">
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs opacity-80" style={{ color: textColor }}>
+          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span>Generating...</span>
+        </div>
+      ) : note?.content ? (
+        <div className="flex gap-1.5 items-start group">
+          <span className="text-xs flex-shrink-0">💡</span>
+          <p
+            className="text-xs leading-relaxed flex-1 opacity-90"
+            style={{ color: textColor }}
+          >
+            {note.content}
+          </p>
+          {onRegenerate && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRegenerate();
+              }}
+              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity p-0.5 rounded"
+              title="Regenerate note"
+            >
+              <svg className="w-3 h-3" style={{ color: textColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="h-8" /> // Placeholder to maintain height
+      )}
+    </div>
+  );
+});
+
+NoteSection.displayName = 'NoteSection';
+
 export const ActionNode = memo(({ data, selected }: ActionNodeProps) => {
   const colors = CATEGORY_COLORS[data.category] || CATEGORY_COLORS.data;
   const [showErrorTooltip, setShowErrorTooltip] = useState(false);
   const hasErrors = data.errors && data.errors.length > 0;
+  const showNotes = data.showNotes !== false; // Default to true
 
   // Get summary info based on action type
   const getSummary = () => {
@@ -51,7 +111,7 @@ export const ActionNode = memo(({ data, selected }: ActionNodeProps) => {
   return (
     <div
       className={`
-        px-3 py-2 rounded-lg shadow-md border-2 min-w-[160px] max-w-[220px] transition-all relative
+        px-3 py-2 rounded-lg shadow-md border-2 transition-all relative
         ${selected ? 'ring-2 ring-offset-2' : ''}
         ${hasErrors ? 'border-red-500' : ''}
       `}
@@ -59,6 +119,8 @@ export const ActionNode = memo(({ data, selected }: ActionNodeProps) => {
         backgroundColor: colors.bg,
         borderColor: hasErrors ? '#ef4444' : colors.border,
         '--tw-ring-color': colors.border,
+        width: NODE_DIMENSIONS.width,
+        minHeight: NODE_DIMENSIONS.height,
       } as CSSProperties}
     >
       {/* Error Indicator */}
@@ -98,54 +160,66 @@ export const ActionNode = memo(({ data, selected }: ActionNodeProps) => {
         style={{ borderColor: colors.border }}
       />
 
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-base">{data.icon}</span>
-        <span
-          className="font-semibold text-sm"
-          style={{ color: colors.text }}
-        >
-          {data.actionType}
-        </span>
-      </div>
-
-      {/* Summary */}
-      {summary && (
-        <div
-          className="text-xs opacity-90 truncate font-mono"
-          style={{ color: colors.text }}
-          title={summary}
-        >
-          {summary}
+      {/* Main content */}
+      <div className="node-main-content">
+        {/* Header */}
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-base">{data.icon}</span>
+          <span
+            className="font-semibold text-sm flex-1"
+            style={{ color: colors.text }}
+          >
+            {data.actionType}
+          </span>
+          <InfoTooltip text={getNodeDescription(data.actionType)} position="top" />
         </div>
-      )}
 
-      {/* Variables */}
-      <div className="flex flex-wrap gap-1 mt-2">
-        {/* Inputs */}
-        {data.inputs.map((input: string) => (
-          <span
-            key={input}
-            className="text-xs px-1.5 py-0.5 rounded bg-white/20 font-mono"
+        {/* Summary */}
+        {summary && (
+          <div
+            className="text-xs opacity-90 truncate font-mono"
             style={{ color: colors.text }}
-            title={`Input: ${input}`}
+            title={summary}
           >
-            {`{{${input}}}`}
-          </span>
-        ))}
+            {summary}
+          </div>
+        )}
 
-        {/* Outputs */}
-        {data.outputs.map((output: string) => (
-          <span
-            key={output}
-            className="text-xs px-1.5 py-0.5 rounded bg-black/20 font-mono"
-            style={{ color: colors.text }}
-            title={`Output: ${output}`}
-          >
-            {`→ ${output}`}
-          </span>
-        ))}
+        {/* Variables */}
+        <div className="flex flex-wrap gap-1 mt-2">
+          {/* Inputs */}
+          {data.inputs.map((input: string) => (
+            <span
+              key={input}
+              className="text-xs px-1.5 py-0.5 rounded bg-white/20 font-mono"
+              style={{ color: colors.text }}
+              title={`Input: ${input}`}
+            >
+              {`{{${input}}}`}
+            </span>
+          ))}
+
+          {/* Outputs */}
+          {data.outputs.map((output: string) => (
+            <span
+              key={output}
+              className="text-xs px-1.5 py-0.5 rounded bg-black/20 font-mono"
+              style={{ color: colors.text }}
+              title={`Output: ${output}`}
+            >
+              {`→ ${output}`}
+            </span>
+          ))}
+        </div>
       </div>
+
+      {/* Integrated Note Section */}
+      <NoteSection
+        note={showNotes ? data.aiNote : undefined}
+        isRegenerating={data.isRegenerating}
+        onRegenerate={data.onRegenerateNote}
+        textColor={colors.text}
+      />
 
       {/* Output Handle */}
       <Handle
