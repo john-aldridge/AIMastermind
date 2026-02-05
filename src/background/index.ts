@@ -5,6 +5,67 @@ import { networkMonitor } from '@/utils/networkMonitor';
 import { AutoLoadRuleStorageService } from '@/storage/autoLoadRuleStorage';
 import type { AutoLoadRule } from '@/types/autoLoadRule';
 import { initializeConfigArchitecture } from '@/services/configInit';
+import { advancedDebugger } from '@/services/advancedDebugger';
+
+// ============================================
+// Background Console Interception
+// ============================================
+// Store original console methods
+const originalConsole = {
+  log: console.log.bind(console),
+  info: console.info.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+  debug: console.debug.bind(console),
+};
+
+// Background logs buffer (shared with handleConsoleLog)
+const backgroundLogs: Array<{
+  id: string;
+  timestamp: number;
+  level: string;
+  source: string;
+  message: string;
+}> = [];
+const MAX_BACKGROUND_LOGS = 500;
+
+// Helper to format args to string
+const formatLogMessage = (args: any[]): string => {
+  return args.map(arg => {
+    if (typeof arg === 'string') return arg;
+    if (arg instanceof Error) return `${arg.name}: ${arg.message}`;
+    try {
+      return JSON.stringify(arg);
+    } catch {
+      return String(arg);
+    }
+  }).join(' ');
+};
+
+// Always intercept background console logs (our own extension code)
+// This runs immediately at startup
+(['log', 'info', 'warn', 'error', 'debug'] as const).forEach(level => {
+  (console as any)[level] = (...args: any[]) => {
+    // Always call original
+    originalConsole[level](...args);
+
+    // Always capture our own extension logs
+    const logEntry = {
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      level,
+      source: 'background',
+      message: formatLogMessage(args),
+    };
+
+    backgroundLogs.push(logEntry);
+
+    // Trim if over limit
+    if (backgroundLogs.length > MAX_BACKGROUND_LOGS) {
+      backgroundLogs.splice(0, backgroundLogs.length - MAX_BACKGROUND_LOGS);
+    }
+  };
+});
 
 console.log('Synergy AI background script loaded');
 
@@ -491,6 +552,101 @@ async function handleMessage(
     case MessageType.CHECK_AUTO_LOAD_RULES:
       return handleCheckAutoLoadRules(message.payload);
 
+    case MessageType.CONSOLE_LOG:
+      return handleConsoleLog(message.payload, sender?.tab?.id);
+
+    case MessageType.GET_CONSOLE_MONITORING_LEVEL:
+      return handleGetConsoleMonitoringLevel();
+
+    case MessageType.SET_CONSOLE_MONITORING_LEVEL:
+      return handleSetConsoleMonitoringLevel(message.payload);
+
+    case MessageType.GET_CONSOLE_LOGS:
+      return handleGetConsoleLogs(message.payload);
+
+    case MessageType.MESSAGING_DATA_INTERCEPTED:
+      return handleMessagingData(message.payload, sender?.tab?.id);
+
+    case MessageType.GET_MESSAGING_MONITORING_ENABLED:
+      return handleGetMessagingMonitoringEnabled();
+
+    case MessageType.SET_MESSAGING_MONITORING_ENABLED:
+      return handleSetMessagingMonitoringEnabled(message.payload);
+
+    case MessageType.GET_MESSAGING_DATA:
+      return handleGetMessagingData(message.payload);
+
+    // Advanced Debugging
+    case MessageType.GET_ADVANCED_DEBUGGING_SETTINGS:
+      return handleGetAdvancedDebuggingSettings();
+
+    case MessageType.SET_ADVANCED_DEBUGGING_SETTINGS:
+      return handleSetAdvancedDebuggingSettings(message.payload);
+
+    case MessageType.START_DOM_TRACKING:
+      return handleStartDOMTracking(message.payload);
+
+    case MessageType.STOP_DOM_TRACKING:
+      return handleStopDOMTracking(message.payload);
+
+    case MessageType.DOM_MUTATION:
+      return handleDOMMutation(message.payload, sender?.tab?.id);
+
+    case MessageType.GET_DOM_MUTATIONS:
+      return handleGetDOMMutations(message.payload);
+
+    case MessageType.TAKE_HEAP_SNAPSHOT:
+      return handleTakeHeapSnapshot(message.payload);
+
+    case MessageType.START_ALLOCATION_TRACKING:
+      return handleStartAllocationTracking(message.payload);
+
+    case MessageType.STOP_ALLOCATION_TRACKING:
+      return handleStopAllocationTracking(message.payload);
+
+    case MessageType.GET_HEAP_SNAPSHOTS:
+      return handleGetHeapSnapshots(message.payload);
+
+    case MessageType.START_CPU_PROFILE:
+      return handleStartCPUProfile(message.payload);
+
+    case MessageType.STOP_CPU_PROFILE:
+      return handleStopCPUProfile(message.payload);
+
+    case MessageType.GET_CPU_PROFILES:
+      return handleGetCPUProfiles(message.payload);
+
+    case MessageType.START_CODE_COVERAGE:
+      return handleStartCodeCoverage(message.payload);
+
+    case MessageType.TAKE_COVERAGE_SNAPSHOT:
+      return handleTakeCoverageSnapshot(message.payload);
+
+    case MessageType.STOP_CODE_COVERAGE:
+      return handleStopCodeCoverage(message.payload);
+
+    case MessageType.GET_COVERAGE_REPORTS:
+      return handleGetCoverageReports(message.payload);
+
+    // Network Capture (Debugger-based)
+    case MessageType.START_NETWORK_CAPTURE:
+      return handleStartNetworkCapture(message.payload);
+
+    case MessageType.STOP_NETWORK_CAPTURE:
+      return handleStopNetworkCapture(message.payload);
+
+    case MessageType.GET_CAPTURED_NETWORK_REQUESTS:
+      return handleGetCapturedNetworkRequests(message.payload);
+
+    case MessageType.GET_WEBSOCKET_FRAMES:
+      return handleGetWebSocketFrames(message.payload);
+
+    case MessageType.CLEAR_NETWORK_DATA:
+      return handleClearNetworkData(message.payload);
+
+    case MessageType.GET_NETWORK_CAPTURE_SUMMARY:
+      return handleGetNetworkCaptureSummary(message.payload);
+
     default:
       return { success: false, error: 'Unknown message type' };
   }
@@ -649,8 +805,593 @@ async function handleSetMonitoringLevel(payload: any): Promise<MessageResponse> 
     if (!level) {
       return { success: false, error: 'Level is required' };
     }
+
+    // Get previous level for this tab to determine if we need to start/stop debugger capture
+    const previousLevel = networkMonitor.getLevel(tabId);
+
+    // Set the new level
     const result = await networkMonitor.setLevel(level, tabId);
+
+    if (!result.success) {
+      return result;
+    }
+
+    // Handle debugger-based network capture start/stop
+    if (tabId !== undefined) {
+      if (level === 'debugger-capture' && previousLevel !== 'debugger-capture') {
+        // Start debugger-based network capture
+        try {
+          await advancedDebugger.startNetworkCapture(tabId);
+          console.log(`[Background] Started debugger network capture for tab ${tabId}`);
+        } catch (err) {
+          console.error(`[Background] Failed to start debugger network capture:`, err);
+          // Revert level on failure
+          await networkMonitor.setLevel(previousLevel, tabId);
+          return { success: false, error: `Failed to start debugger capture: ${err}` };
+        }
+      } else if (previousLevel === 'debugger-capture' && level !== 'debugger-capture') {
+        // Stop debugger-based network capture
+        try {
+          await advancedDebugger.stopNetworkCapture(tabId);
+          console.log(`[Background] Stopped debugger network capture for tab ${tabId}`);
+        } catch (err) {
+          console.error(`[Background] Failed to stop debugger network capture:`, err);
+          // Don't fail the level change, just log the error
+        }
+      }
+    }
+
     return result;
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+// Console monitoring storage key
+const CONSOLE_MONITORING_LEVEL_KEY = 'consoleMonitoringLevel';
+
+// Store console logs in memory (limited buffer)
+const consoleLogs: Array<{
+  id: string;
+  timestamp: number;
+  level: string;
+  source: string;
+  message: string;
+  url?: string;
+  tabId?: number;
+}> = [];
+const MAX_CONSOLE_LOGS = 500;
+
+async function handleConsoleLog(payload: any, tabId?: number): Promise<MessageResponse> {
+  try {
+    const logEntry = {
+      id: crypto.randomUUID(),
+      timestamp: payload.timestamp || Date.now(),
+      level: payload.level || 'log',
+      source: payload.source || 'unknown',
+      message: payload.message || '',
+      url: payload.url,
+      tabId,
+    };
+
+    consoleLogs.push(logEntry);
+
+    // Trim if over limit
+    if (consoleLogs.length > MAX_CONSOLE_LOGS) {
+      consoleLogs.splice(0, consoleLogs.length - MAX_CONSOLE_LOGS);
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetConsoleMonitoringLevel(): Promise<MessageResponse> {
+  try {
+    const data = await chrome.storage.local.get(CONSOLE_MONITORING_LEVEL_KEY);
+    // Default to 'extension' if not set
+    const level = data[CONSOLE_MONITORING_LEVEL_KEY] || 'extension';
+    return { success: true, data: level };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleSetConsoleMonitoringLevel(payload: any): Promise<MessageResponse> {
+  try {
+    const { level } = payload;
+    if (!level) {
+      return { success: false, error: 'Level is required' };
+    }
+
+    // Save to storage
+    await chrome.storage.local.set({ [CONSOLE_MONITORING_LEVEL_KEY]: level });
+
+    // Notify all content scripts of the change
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, {
+          type: MessageType.CONSOLE_MONITORING_LEVEL_CHANGED,
+          level,
+        }).catch(() => {
+          // Ignore errors for tabs without content script
+        });
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetConsoleLogs(payload: any): Promise<MessageResponse> {
+  try {
+    const { source, level, since, limit = 100 } = payload || {};
+
+    // Combine background logs and content script logs
+    let allLogs = [...backgroundLogs, ...consoleLogs];
+
+    // Filter by source if specified
+    if (source) {
+      const sources = Array.isArray(source) ? source : [source];
+      allLogs = allLogs.filter(log => sources.includes(log.source));
+    }
+
+    // Filter by level if specified
+    if (level) {
+      const levels = Array.isArray(level) ? level : [level];
+      allLogs = allLogs.filter(log => levels.includes(log.level));
+    }
+
+    // Filter by timestamp if specified
+    if (since) {
+      allLogs = allLogs.filter(log => log.timestamp >= since);
+    }
+
+    // Sort by timestamp (newest first)
+    allLogs.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Limit results
+    allLogs = allLogs.slice(0, limit);
+
+    return { success: true, data: allLogs };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+// ============================================
+// Messaging Monitoring (postMessage, MessageChannel, BroadcastChannel)
+// ============================================
+const MESSAGING_MONITORING_KEY = 'messagingMonitoringEnabled';
+
+// Store intercepted messages in memory (limited buffer)
+const messagingData: Array<{
+  id: string;
+  timestamp: number;
+  type: string; // 'postMessage' | 'MessageChannel' | 'BroadcastChannel'
+  direction?: string; // 'incoming' | 'outgoing'
+  message: string;
+  channelName?: string;
+  channelId?: number;
+  port?: string;
+  origin?: string;
+  targetOrigin?: string;
+  sourceOrigin?: string;
+  frameType?: string;
+  frameUrl?: string;
+  tabId?: number;
+  event?: string; // 'created' | 'closed'
+}> = [];
+const MAX_MESSAGING_DATA = 500;
+
+async function handleMessagingData(payload: any, tabId?: number): Promise<MessageResponse> {
+  try {
+    const entry = {
+      id: crypto.randomUUID(),
+      timestamp: payload.timestamp || Date.now(),
+      type: payload.type || 'unknown',
+      direction: payload.direction,
+      message: payload.message || '',
+      channelName: payload.channelName,
+      channelId: payload.channelId,
+      port: payload.port,
+      origin: payload.origin,
+      targetOrigin: payload.targetOrigin,
+      sourceOrigin: payload.sourceOrigin,
+      frameType: payload.frameType,
+      frameUrl: payload.frameUrl,
+      tabId,
+      event: payload.event,
+    };
+
+    messagingData.push(entry);
+
+    // Trim if over limit
+    if (messagingData.length > MAX_MESSAGING_DATA) {
+      messagingData.splice(0, messagingData.length - MAX_MESSAGING_DATA);
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetMessagingMonitoringEnabled(): Promise<MessageResponse> {
+  try {
+    const data = await chrome.storage.local.get(MESSAGING_MONITORING_KEY);
+    // Default to false (disabled by default)
+    const enabled = data[MESSAGING_MONITORING_KEY] === true;
+    return { success: true, data: enabled };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleSetMessagingMonitoringEnabled(payload: any): Promise<MessageResponse> {
+  try {
+    const { enabled } = payload;
+    if (typeof enabled !== 'boolean') {
+      return { success: false, error: 'enabled must be a boolean' };
+    }
+
+    // Save to storage
+    await chrome.storage.local.set({ [MESSAGING_MONITORING_KEY]: enabled });
+
+    // Notify all content scripts of the change
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, {
+          type: MessageType.MESSAGING_MONITORING_CHANGED,
+          enabled,
+        }).catch(() => {
+          // Ignore errors for tabs without content script
+        });
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetMessagingData(payload: any): Promise<MessageResponse> {
+  try {
+    const { type, direction, since, limit = 100 } = payload || {};
+
+    let filtered = [...messagingData];
+
+    // Filter by type if specified
+    if (type) {
+      const types = Array.isArray(type) ? type : [type];
+      filtered = filtered.filter(m => types.includes(m.type));
+    }
+
+    // Filter by direction if specified
+    if (direction) {
+      filtered = filtered.filter(m => m.direction === direction);
+    }
+
+    // Filter by timestamp if specified
+    if (since) {
+      filtered = filtered.filter(m => m.timestamp >= since);
+    }
+
+    // Sort by timestamp (newest first)
+    filtered.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Limit results
+    filtered = filtered.slice(0, limit);
+
+    return { success: true, data: filtered };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+// ============================================
+// Advanced Debugging Handlers
+// ============================================
+
+async function handleGetAdvancedDebuggingSettings(): Promise<MessageResponse> {
+  try {
+    const settings = await advancedDebugger.getSettings();
+    return { success: true, data: settings };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleSetAdvancedDebuggingSettings(payload: any): Promise<MessageResponse> {
+  try {
+    await advancedDebugger.updateSettings(payload);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStartDOMTracking(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    await advancedDebugger.startDOMTracking(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStopDOMTracking(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    await advancedDebugger.stopDOMTracking(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleDOMMutation(payload: any, tabId?: number): Promise<MessageResponse> {
+  try {
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    advancedDebugger.addDOMMutation(tabId, payload);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetDOMMutations(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId, since } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const mutations = advancedDebugger.getDOMMutations(tabId, { since });
+    return { success: true, data: mutations };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleTakeHeapSnapshot(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const snapshot = await advancedDebugger.takeHeapSnapshot(tabId);
+    return { success: true, data: snapshot };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStartAllocationTracking(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    await advancedDebugger.startAllocationTracking(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStopAllocationTracking(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const profile = await advancedDebugger.stopAllocationTracking(tabId);
+    return { success: true, data: profile };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetHeapSnapshots(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const snapshots = advancedDebugger.getHeapSnapshots(tabId);
+    return { success: true, data: snapshots };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStartCPUProfile(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    await advancedDebugger.startCPUProfile(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStopCPUProfile(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const profile = await advancedDebugger.stopCPUProfile(tabId);
+    return { success: true, data: profile };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetCPUProfiles(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const profiles = advancedDebugger.getCPUProfiles(tabId);
+    return { success: true, data: profiles };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStartCodeCoverage(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    await advancedDebugger.startCoverage(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleTakeCoverageSnapshot(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const report = await advancedDebugger.takeCoverageSnapshot(tabId);
+    return { success: true, data: report };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStopCodeCoverage(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const report = await advancedDebugger.stopCoverage(tabId);
+    return { success: true, data: report };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetCoverageReports(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const reports = advancedDebugger.getCoverageReports(tabId);
+    return { success: true, data: reports };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+// ============================================
+// Network Capture Handlers (Debugger-based)
+// ============================================
+
+async function handleStartNetworkCapture(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    await advancedDebugger.startNetworkCapture(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleStopNetworkCapture(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    await advancedDebugger.stopNetworkCapture(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetCapturedNetworkRequests(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId, since, resourceTypes, urlPattern } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const requests = advancedDebugger.getNetworkRequests(tabId, {
+      since,
+      resourceTypes,
+      urlPattern,
+    });
+    return { success: true, data: requests };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetWebSocketFrames(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId, since, requestId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const frames = advancedDebugger.getWebSocketFrames(tabId, { since, requestId });
+    return { success: true, data: frames };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleClearNetworkData(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    advancedDebugger.clearNetworkData(tabId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+async function handleGetNetworkCaptureSummary(payload: any): Promise<MessageResponse> {
+  try {
+    const { tabId } = payload;
+    if (!tabId) {
+      return { success: false, error: 'Tab ID required' };
+    }
+    const summary = advancedDebugger.getNetworkSummary(tabId);
+    return { success: true, data: summary };
   } catch (error) {
     return { success: false, error: String(error) };
   }

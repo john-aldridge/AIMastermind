@@ -3,6 +3,9 @@ import { useAppStore } from '@/state/appStore';
 import { MONITORING_LEVELS, MonitoringLevel } from '@/utils/networkMonitor';
 import { permissionManager } from '@/utils/permissions';
 import { sendToBackground, MessageType } from '@/utils/messaging';
+import { NetworkCaptureOptions } from './settings/NetworkCaptureOptions';
+import { advancedDebugger } from '@/services/advancedDebugger';
+import type { NetworkCaptureSettings } from '@/types/advancedDebugging';
 
 export const NetworkSettings: React.FC = () => {
   const { userConfig, updateUserConfig } = useAppStore();
@@ -11,6 +14,8 @@ export const NetworkSettings: React.FC = () => {
   const [grantedPermissions, setGrantedPermissions] = useState<string[]>([]);
   const [requestCount, setRequestCount] = useState(0);
   const [currentTabId, setCurrentTabId] = useState<number | undefined>();
+  const [networkCaptureSettings, setNetworkCaptureSettings] = useState<NetworkCaptureSettings | null>(null);
+  const [debuggerRequestCount, setDebuggerRequestCount] = useState(0);
 
   useEffect(() => {
     // Get current tab ID on mount
@@ -61,6 +66,36 @@ export const NetworkSettings: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [currentTabId]);
+
+  // Load and subscribe to network capture settings for debugger mode
+  useEffect(() => {
+    advancedDebugger.getSettings().then(settings => {
+      setNetworkCaptureSettings(settings.network);
+    });
+
+    const unsubscribe = advancedDebugger.subscribe(settings => {
+      setNetworkCaptureSettings(settings.network);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Update debugger request count when in debugger-capture mode
+  useEffect(() => {
+    if (currentLevel !== 'debugger-capture' || !currentTabId) return;
+
+    const interval = setInterval(async () => {
+      const response = await sendToBackground({
+        type: MessageType.GET_CAPTURED_NETWORK_REQUESTS,
+        payload: { tabId: currentTabId }
+      });
+      if (response.success && response.data) {
+        setDebuggerRequestCount(response.data.length);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [currentLevel, currentTabId]);
 
   const loadCurrentSettings = async (tabId: number) => {
     // Get the monitoring level for this specific tab from background
@@ -183,8 +218,25 @@ export const NetworkSettings: React.FC = () => {
     setRequestCount(0);
   };
 
+  const handleClearDebuggerRequests = async () => {
+    if (!currentTabId) return;
+    await sendToBackground({
+      type: MessageType.CLEAR_NETWORK_DATA,
+      payload: { tabId: currentTabId }
+    });
+    setDebuggerRequestCount(0);
+  };
+
+  const handleNetworkCaptureSettingsChange = async (partial: Partial<NetworkCaptureSettings>) => {
+    if (!networkCaptureSettings) return;
+    const updated = { ...networkCaptureSettings, ...partial };
+    await advancedDebugger.updateSettings({ network: updated });
+  };
+
   // Check if monitoring is active for this tab
   const isMonitoringActive = currentLevel !== 'filtering-only';
+  const isDebuggerMode = currentLevel === 'debugger-capture';
+  const displayedRequestCount = isDebuggerMode ? debuggerRequestCount : requestCount;
 
   return (
     <div className="space-y-4">
@@ -193,15 +245,17 @@ export const NetworkSettings: React.FC = () => {
         {isMonitoringActive ? (
           <>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-xs text-gray-600">Active (this tab)</span>
+              <div className={`w-2 h-2 rounded-full animate-pulse ${isDebuggerMode ? 'bg-purple-500' : 'bg-green-500'}`}></div>
+              <span className="text-xs text-gray-600">
+                {isDebuggerMode ? 'Debugger Active' : 'Active'} (this tab)
+              </span>
             </div>
             <span className="text-xs text-gray-500">
-              {requestCount} requests captured
+              {displayedRequestCount} requests captured
             </span>
-            {requestCount > 0 && (
+            {displayedRequestCount > 0 && (
               <button
-                onClick={handleClearRequests}
+                onClick={isDebuggerMode ? handleClearDebuggerRequests : handleClearRequests}
                 className="text-xs text-blue-600 hover:text-blue-700"
               >
                 Clear
@@ -321,6 +375,16 @@ export const NetworkSettings: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {key === 'debugger-capture' && isSelected && networkCaptureSettings && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <NetworkCaptureOptions
+                        settings={networkCaptureSettings}
+                        onChange={handleNetworkCaptureSettingsChange}
+                        disabled={isChanging}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </label>
@@ -329,12 +393,12 @@ export const NetworkSettings: React.FC = () => {
       </div>
 
       {/* Granted Permissions */}
-      {grantedPermissions.some(p => ['webRequest'].includes(p)) && (
+      {grantedPermissions.some(p => ['webRequest', 'debugger'].includes(p)) && (
         <div className="border-t pt-4">
           <h4 className="font-medium text-sm mb-2 text-gray-700">Granted Optional Permissions</h4>
           <div className="space-y-2">
             {grantedPermissions
-              .filter(p => ['webRequest'].includes(p))
+              .filter(p => ['webRequest', 'debugger'].includes(p))
               .map(permission => (
                 <div
                   key={permission}

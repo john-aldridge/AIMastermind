@@ -5,7 +5,7 @@
 
 import { permissionManager } from './permissions';
 
-export type MonitoringLevel = 'filtering-only' | 'api-monitoring' | 'full-monitoring';
+export type MonitoringLevel = 'filtering-only' | 'api-monitoring' | 'full-monitoring' | 'debugger-capture';
 
 export interface MonitoringConfig {
   level: MonitoringLevel;
@@ -76,6 +76,22 @@ export const MONITORING_LEVELS: Record<MonitoringLevel, MonitoringConfig> = {
     performance: 'moderate',
     note: 'Maximum visibility: captures all network traffic + extracts all JavaScript. Higher memory usage.',
     userWarning: 'This mode extracts all JavaScript code from the page for AI analysis. This may use significant memory on complex pages.'
+  },
+  'debugger-capture': {
+    level: 'debugger-capture',
+    description: 'Debugger-Based Capture',
+    permissions: ['debugger'],
+    features: [
+      'Capture ALL network traffic via Chrome DevTools Protocol',
+      'Full request/response bodies including images, CSS, fonts',
+      'WebSocket frame capture (real-time messages)',
+      'Service Worker fetch interception',
+      'Works on strict CSP pages where content scripts fail',
+      'Configurable resource type and URL filtering'
+    ],
+    performance: 'moderate',
+    note: 'Most comprehensive capture. Uses Chrome debugger API - shows debugger indicator on tab.',
+    userWarning: 'This attaches the Chrome debugger to the tab. A "debugging this tab" indicator will appear. The debugger will be detached when you close the side panel or switch modes.'
   }
 };
 
