@@ -7,6 +7,7 @@
 
 import { AgentRegistry } from './AgentRegistry';
 import { CapsuleWardrobeAgent } from './CapsuleWardrobeAgent';
+import { JiraAgent } from './JiraAgent';
 
 /**
  * Register all agents
@@ -17,6 +18,7 @@ export function registerAllAgents(): void {
 
   // Register built-in agents
   AgentRegistry.register(CapsuleWardrobeAgent);
+  AgentRegistry.register(JiraAgent);
 
   // Add more agents here as they're created:
   // AgentRegistry.register(RecipeCollectionAgent);

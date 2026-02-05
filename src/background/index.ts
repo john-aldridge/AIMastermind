@@ -67,10 +67,14 @@ const formatLogMessage = (args: any[]): string => {
   };
 });
 
-console.log('Synergy AI background script loaded');
+const bgStartTime = performance.now();
+console.log(`[Background] 🚀 Service worker starting at ${new Date().toISOString()}`);
 
 // Initialize API service with stored config
 async function initializeAPIService() {
+  const startTime = performance.now();
+  console.log('[Background] ⏱️ initializeAPIService started');
+
   const config = await chromeStorageService.loadUserConfig();
   if (config?.activeConfigurationId && config.savedConfigurations) {
     const activeConfig = config.savedConfigurations.find(
@@ -92,10 +96,14 @@ async function initializeAPIService() {
       apiService.setModel(activeConfig.model);
     }
   }
+
+  console.log(`[Background] ✅ initializeAPIService complete: ${(performance.now() - startTime).toFixed(1)}ms`);
 }
 
 // Initialize on startup
-initializeAPIService();
+initializeAPIService().then(() => {
+  console.log(`[Background] ✅ Service worker ready: ${(performance.now() - bgStartTime).toFixed(1)}ms since start`);
+});
 
 // Initialize config-based architecture
 initializeConfigArchitecture();
@@ -711,16 +719,34 @@ async function handleSyncState(payload: any): Promise<MessageResponse> {
 }
 
 async function handleLoadState(): Promise<MessageResponse> {
+  const startTime = performance.now();
+  console.log('[Background] ⏱️ handleLoadState started');
+
   try {
+    let stepStart = performance.now();
     const plans = await chromeStorageService.loadPlans();
+    console.log(`[Background] ⏱️ loadPlans: ${(performance.now() - stepStart).toFixed(1)}ms`);
+
+    stepStart = performance.now();
     const userConfig = await chromeStorageService.loadUserConfig();
+    console.log(`[Background] ⏱️ loadUserConfig: ${(performance.now() - stepStart).toFixed(1)}ms`);
+
+    stepStart = performance.now();
     const activePlanId = await chromeStorageService.loadActivePlan();
+    console.log(`[Background] ⏱️ loadActivePlan: ${(performance.now() - stepStart).toFixed(1)}ms`);
+
+    stepStart = performance.now();
     const chatMessages = await chromeStorageService.loadChatMessages();
+    console.log(`[Background] ⏱️ loadChatMessages: ${(performance.now() - stepStart).toFixed(1)}ms`);
+
+    console.log(`[Background] ✅ handleLoadState complete: ${(performance.now() - startTime).toFixed(1)}ms total`);
+
     return {
       success: true,
       data: { plans, userConfig, activePlanId, chatMessages },
     };
   } catch (error) {
+    console.error(`[Background] ❌ handleLoadState failed after ${(performance.now() - startTime).toFixed(1)}ms:`, error);
     return { success: false, error: String(error) };
   }
 }

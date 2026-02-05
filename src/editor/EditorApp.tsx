@@ -5,13 +5,14 @@ import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
 import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MonacoEditor } from '../sidepanel/components/MonacoEditor';
 import { VersionManager } from '../sidepanel/components/VersionManager';
 import { EditorChatPanel } from '../sidepanel/components/EditorChatPanel';
 import { ResizablePanel } from './ResizablePanel';
 import { ResourcesPane, ResourceType } from './components/ResourcesPane';
 import { MarkdownPreview } from './components/MarkdownPreview';
+import { AgentFlowView } from '../sidepanel/components/AgentFlowView';
 import { apiService } from '../utils/api';
 import { ConfigStorageService } from '../storage/configStorage';
 import { ConfigRegistry } from '../services/configRegistry';
@@ -102,10 +103,11 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   const [versionBump, setVersionBump] = useState<'none' | 'patch' | 'minor' | 'major'>('none');
   const [selectedResource, setSelectedResource] = useState<ResourceType>('agent-code');
   const [editorMode, setEditorMode] = useState<'details' | 'preview'>('details');
+  const [viewMode, setViewMode] = useState<'code' | 'flow'>('flow');
   const [readmeContent, setReadmeContent] = useState<string>('');
   const [originalReadme, setOriginalReadme] = useState<string>('');
   const [isResourcesPaneCollapsed, setIsResourcesPaneCollapsed] = useState(true);
-  const [isAIAssistantCollapsed, setIsAIAssistantCollapsed] = useState(true);
+  const [isAIAssistantCollapsed, setIsAIAssistantCollapsed] = useState(false);
   const [copyButtonText, setCopyButtonText] = useState('Copy All');
   const [availableTabs, setAvailableTabs] = useState<chrome.tabs.Tab[]>([]);
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
@@ -118,6 +120,16 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [showValidationModal, setShowValidationModal] = useState(false);
   const validationTimerRef = useRef<number | null>(null);
+
+  // Parsed config for flow view
+  const parsedConfig = useMemo((): AgentConfig | null => {
+    if (validationStatus !== 'valid') return null;
+    try {
+      return JSON.parse(code);
+    } catch {
+      return null;
+    }
+  }, [code, validationStatus]);
 
   // Run configuration state
   const [showRunDropdown, setShowRunDropdown] = useState(false);
@@ -377,6 +389,12 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   };
 
   const handleCodeChange = (newCode: string) => {
+    setCode(newCode);
+  };
+
+  // Handle config change from flow view
+  const handleFlowConfigChange = (newConfig: AgentConfig) => {
+    const newCode = JSON.stringify(newConfig, null, 2);
     setCode(newCode);
   };
 
@@ -828,31 +846,72 @@ export const EditorApp: React.FC<EditorAppProps> = ({
       <div className="flex-1 flex flex-col">
         <div className="bg-gray-100 px-4 py-2 border-b border-gray-200 text-sm font-medium text-gray-700 flex-shrink-0 flex items-center justify-between gap-2 overflow-x-auto">
           <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="whitespace-nowrap">
-              {selectedResource === 'agent-code' ? 'Agent' : 'README'}
-            </span>
-            <div className="flex gap-1">
-              <button
-                onClick={() => setEditorMode('details')}
-                className={`px-3 py-1 text-xs rounded transition-colors whitespace-nowrap ${
-                  editorMode === 'details'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                Details
-              </button>
-              <button
-                onClick={() => setEditorMode('preview')}
-                className={`px-3 py-1 text-xs rounded transition-colors whitespace-nowrap ${
-                  editorMode === 'preview'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                Preview
-              </button>
-            </div>
+            {/* Agent Code: Label + Flow/Code Toggle */}
+            {selectedResource === 'agent-code' && (
+              <>
+                <span className="whitespace-nowrap">Agent</span>
+                <div className="flex gap-0.5 bg-gray-200 rounded p-0.5">
+                  <button
+                    onClick={() => {
+                      if (validationStatus === 'valid') {
+                        setViewMode('flow');
+                      }
+                    }}
+                    disabled={validationStatus !== 'valid'}
+                    className={`px-2.5 py-1 text-xs rounded transition-colors whitespace-nowrap ${
+                      viewMode === 'flow'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : validationStatus !== 'valid'
+                        ? 'text-gray-400 cursor-not-allowed'
+                        : 'text-gray-600 hover:bg-gray-300'
+                    }`}
+                    title={validationStatus !== 'valid' ? 'Fix validation errors to use Flow view' : 'Visual Flow Editor'}
+                  >
+                    Flow
+                  </button>
+                  <button
+                    onClick={() => setViewMode('code')}
+                    className={`px-2.5 py-1 text-xs rounded transition-colors whitespace-nowrap ${
+                      viewMode === 'code'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-300'
+                    }`}
+                    title="Code Editor"
+                  >
+                    Code
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* README: Label + Details/Preview Toggle */}
+            {selectedResource === 'readme' && (
+              <>
+                <span className="whitespace-nowrap">README</span>
+                <div className="flex gap-0.5 bg-gray-200 rounded p-0.5">
+                  <button
+                    onClick={() => setEditorMode('details')}
+                    className={`px-2.5 py-1 text-xs rounded transition-colors whitespace-nowrap ${
+                      editorMode === 'details'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-300'
+                    }`}
+                  >
+                    Details
+                  </button>
+                  <button
+                    onClick={() => setEditorMode('preview')}
+                    className={`px-2.5 py-1 text-xs rounded transition-colors whitespace-nowrap ${
+                      editorMode === 'preview'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:bg-gray-300'
+                    }`}
+                  >
+                    Preview
+                  </button>
+                </div>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Validation Status Indicator - only for agent-code */}
@@ -937,27 +996,33 @@ export const EditorApp: React.FC<EditorAppProps> = ({
           </div>
         </div>
         <div className="flex-1 overflow-hidden">
-          {editorMode === 'details' ? (
-            selectedResource === 'agent-code' ? (
+          {/* Agent Code Views */}
+          {selectedResource === 'agent-code' && (
+            viewMode === 'flow' && parsedConfig ? (
+              <AgentFlowView
+                config={parsedConfig}
+                onConfigChange={handleFlowConfigChange}
+                onSave={handleSave}
+              />
+            ) : (
               <MonacoEditor
                 value={code}
                 onChange={handleCodeChange}
                 language="json"
                 theme="vs-dark"
               />
-            ) : (
+            )
+          )}
+
+          {/* README Views */}
+          {selectedResource === 'readme' && (
+            editorMode === 'details' ? (
               <textarea
                 value={readmeContent}
                 onChange={(e) => setReadmeContent(e.target.value)}
                 className="w-full h-full p-4 font-mono text-sm resize-none focus:outline-none border-0 bg-[#1e1e1e] text-[#d4d4d4]"
                 placeholder="Edit your README here..."
               />
-            )
-          ) : (
-            selectedResource === 'agent-code' ? (
-              <div className="h-full flex items-center justify-center bg-gray-50 text-gray-500">
-                No Preview Available
-              </div>
             ) : (
               <MarkdownPreview content={readmeContent} />
             )

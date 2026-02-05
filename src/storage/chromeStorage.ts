@@ -1,4 +1,5 @@
-import { MasterPlan, UserConfig, ChatMessage } from '@/state/appStore';
+import { MasterPlan, UserConfig } from '@/state/appStore';
+import type { ChatStorageState } from '@/types/chat';
 
 /**
  * Chrome storage API wrapper for extension data
@@ -15,7 +16,9 @@ const STORAGE_KEYS = {
   PLANS: 'ai_mastermind_plans',
   USER_CONFIG: 'ai_mastermind_user_config',
   ACTIVE_PLAN: 'ai_mastermind_active_plan',
-  CHAT_MESSAGES: 'ai_mastermind_chat_messages',
+  CHAT_MESSAGES: 'ai_mastermind_chat_messages', // Legacy, kept for migration
+  CHAT_SESSIONS: 'ai_mastermind_chat_sessions',
+  SIDEBAR_COLLAPSED: 'ai_mastermind_sidebar_collapsed',
 } as const;
 
 export const chromeStorageService = {
@@ -78,8 +81,8 @@ export const chromeStorageService = {
     }
   },
 
-  // Chat messages
-  saveChatMessages: async (messages: ChatMessage[]): Promise<void> => {
+  // Legacy chat messages (kept for migration support)
+  saveChatMessages: async (messages: any[]): Promise<void> => {
     try {
       await chrome.storage.local.set({ [STORAGE_KEYS.CHAT_MESSAGES]: messages });
     } catch (error) {
@@ -87,27 +90,67 @@ export const chromeStorageService = {
     }
   },
 
-  loadChatMessages: async (): Promise<ChatMessage[]> => {
+  // Legacy: load old messages for migration
+  loadChatMessages: async (): Promise<any[]> => {
     try {
       const result = await chrome.storage.local.get(STORAGE_KEYS.CHAT_MESSAGES);
-      return result[STORAGE_KEYS.CHAT_MESSAGES] || [
-        {
-          id: 'welcome',
-          role: 'assistant' as const,
-          content: 'Hello! Ask me anything about the current page you\'re viewing.',
-          timestamp: Date.now(),
-        },
-      ];
+      return result[STORAGE_KEYS.CHAT_MESSAGES] || [];
     } catch (error) {
       console.error('Error loading chat messages from chrome.storage:', error);
-      return [
-        {
-          id: 'welcome',
-          role: 'assistant' as const,
-          content: 'Hello! Ask me anything about the current page you\'re viewing.',
-          timestamp: Date.now(),
-        },
-      ];
+      return [];
+    }
+  },
+
+  // Clear legacy chat messages after migration
+  clearLegacyChatMessages: async (): Promise<void> => {
+    try {
+      await chrome.storage.local.remove(STORAGE_KEYS.CHAT_MESSAGES);
+    } catch (error) {
+      console.error('Error clearing legacy chat messages:', error);
+    }
+  },
+
+  // Chat sessions - new session-based storage
+  saveChatSessions: async (state: ChatStorageState): Promise<void> => {
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEYS.CHAT_SESSIONS]: state });
+    } catch (error) {
+      console.error('Error saving chat sessions to chrome.storage:', error);
+    }
+  },
+
+  loadChatSessions: async (): Promise<ChatStorageState> => {
+    try {
+      const result = await chrome.storage.local.get(STORAGE_KEYS.CHAT_SESSIONS);
+      return result[STORAGE_KEYS.CHAT_SESSIONS] || {
+        sessions: [],
+        activeSessionId: null,
+      };
+    } catch (error) {
+      console.error('Error loading chat sessions from chrome.storage:', error);
+      return {
+        sessions: [],
+        activeSessionId: null,
+      };
+    }
+  },
+
+  // Sidebar collapsed state
+  saveSidebarCollapsed: async (collapsed: boolean): Promise<void> => {
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEYS.SIDEBAR_COLLAPSED]: collapsed });
+    } catch (error) {
+      console.error('Error saving sidebar state:', error);
+    }
+  },
+
+  loadSidebarCollapsed: async (): Promise<boolean> => {
+    try {
+      const result = await chrome.storage.local.get(STORAGE_KEYS.SIDEBAR_COLLAPSED);
+      return result[STORAGE_KEYS.SIDEBAR_COLLAPSED] ?? true; // Default collapsed
+    } catch (error) {
+      console.error('Error loading sidebar state:', error);
+      return true;
     }
   },
 

@@ -17,38 +17,64 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
 
   // For registered clients, check if credentials are configured
   const [isConfigured, setIsConfigured] = useState(false);
+  const [isActive, setIsActive] = useState(false);
   const [clientInstance, setClientInstance] = useState<any>(null);
 
-  useEffect(() => {
+  const loadClientState = async () => {
     if (clientMetadata) {
       // Get client instance first
       const instance = ClientRegistry.getInstance(clientMetadata.id);
       setClientInstance(instance);
 
       // Check chrome storage for saved credentials
-      chrome.storage.local.get(`client:${clientMetadata.id}`).then((data) => {
-        const stored = data[`client:${clientMetadata.id}`];
+      const data = await chrome.storage.local.get(`client:${clientMetadata.id}`);
+      const stored = data[`client:${clientMetadata.id}`];
 
-        // Check if configured:
-        // - If client requires no credentials (empty array), it's always configured if stored
-        // - If client requires credentials, check if they're provided
-        const credentialFields = instance?.getCredentialFields() || [];
-        const requiresCredentials = credentialFields.length > 0;
+      // Check if configured:
+      // - If client requires no credentials (empty array), it's always configured if stored
+      // - If client requires credentials, check if they're provided
+      const credentialFields = instance?.getCredentialFields() || [];
+      const requiresCredentials = credentialFields.length > 0;
 
-        if (requiresCredentials) {
-          setIsConfigured(!!stored?.credentials && Object.keys(stored.credentials).length > 0);
-        } else {
-          // No credentials needed - configured if it exists in storage
-          setIsConfigured(!!stored);
-        }
+      if (requiresCredentials) {
+        setIsConfigured(!!stored?.credentials && Object.keys(stored.credentials).length > 0);
+      } else {
+        // No credentials needed - configured if it exists in storage
+        setIsConfigured(!!stored);
+      }
 
-        // Load credentials if available
-        if (stored?.credentials && instance) {
-          instance.setCredentials(stored.credentials);
-        }
-      });
+      // Load active state
+      setIsActive(!!stored?.isActive);
+
+      // Load credentials if available
+      if (stored?.credentials && instance) {
+        instance.setCredentials(stored.credentials);
+      }
     }
+  };
+
+  useEffect(() => {
+    loadClientState();
   }, [clientMetadata]);
+
+  // Toggle active state for built-in clients (stored in chrome.storage)
+  const toggleBuiltInClientActive = async () => {
+    if (!clientMetadata) return;
+
+    const storageKey = `client:${clientMetadata.id}`;
+    const data = await chrome.storage.local.get(storageKey);
+    const stored = data[storageKey] || {};
+
+    const newIsActive = !stored.isActive;
+    await chrome.storage.local.set({
+      [storageKey]: {
+        ...stored,
+        isActive: newIsActive,
+      },
+    });
+
+    setIsActive(newIsActive);
+  };
 
   const handleDelete = () => {
     const name = client?.name || clientMetadata?.name || 'this client';
@@ -70,7 +96,9 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
   const displayIcon = clientMetadata?.icon;
   const capabilitiesCount = client?.capabilities.length || clientInstance?.getCapabilities().length || 0;
   const isBuiltIn = !!clientMetadata; // It's a built-in client if we have metadata
-  const isActive = client?.isActive || false;
+
+  // For imported clients, use the zustand store state; for built-in, use local state from chrome storage
+  const displayIsActive = isBuiltIn ? isActive : (client?.isActive || false);
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -87,7 +115,7 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
               )}
               <h3 className="font-semibold text-gray-800">{displayName}</h3>
               {isBuiltIn && (
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
                   Built-in
                 </span>
               )}
@@ -111,20 +139,40 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
                   <span>v{clientMetadata.version}</span>
                 </>
               )}
-              {isConfigured && isBuiltIn && (
-                <>
-                  <span>•</span>
-                  <span className="text-green-600 font-medium">Configured</span>
-                </>
-              )}
-              {isActive && (
-                <>
-                  <span>•</span>
-                  <span className="text-green-600 font-medium">Active</span>
-                </>
-              )}
             </div>
           </div>
+
+          {/* Active/Inactive Toggle - always visible, disabled if not configured */}
+          {(() => {
+            const canToggle = isBuiltIn ? isConfigured : !!client;
+            return (
+              <button
+                onClick={() => {
+                  if (!canToggle) return;
+                  if (isBuiltIn) {
+                    toggleBuiltInClientActive();
+                  } else if (client) {
+                    toggleClientActive(client.id);
+                  }
+                }}
+                disabled={!canToggle}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  !canToggle
+                    ? 'bg-gray-200 cursor-not-allowed opacity-50'
+                    : displayIsActive
+                    ? 'bg-green-500'
+                    : 'bg-gray-300'
+                }`}
+                title={!canToggle ? 'Configure credentials first' : displayIsActive ? 'Active - click to deactivate' : 'Inactive - click to activate'}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    displayIsActive ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            );
+          })()}
         </div>
 
         <div className="flex gap-2 mt-3">
@@ -147,18 +195,6 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
           ) : (
             // For configured clients (both built-in and imported)
             <>
-              {client && (
-                <button
-                  onClick={() => toggleClientActive(client.id)}
-                  className={`text-xs py-1 px-3 flex-1 rounded ${
-                    client.isActive
-                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      : 'btn-primary'
-                  }`}
-                >
-                  {client.isActive ? 'Deactivate' : 'Activate'}
-                </button>
-              )}
               <button
                 onClick={() => setShowCredentialEditor(true)}
                 className="btn-secondary text-xs py-1 px-3 flex-1"
@@ -248,11 +284,8 @@ export const ClientCard: React.FC<ClientCardProps> = ({ client, clientMetadata }
           clientInstance={clientInstance}
           onClose={() => {
             setShowCredentialEditor(false);
-            // Reload configuration status
-            chrome.storage.local.get(`client:${clientMetadata.id}`).then((data) => {
-              const stored = data[`client:${clientMetadata.id}`];
-              setIsConfigured(!!stored?.credentials && Object.keys(stored.credentials).length > 0);
-            });
+            // Reload configuration and active status
+            loadClientState();
           }}
         />
       )}

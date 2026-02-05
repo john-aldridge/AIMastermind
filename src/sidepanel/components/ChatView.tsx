@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAppStore, ChatMessage } from '@/state/appStore';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useAppStore } from '@/state/appStore';
 import { apiService, ToolDefinition } from '@/utils/api';
 import { MessageType } from '@/utils/messaging';
 import { FileAnalysis } from './FileAnalysis';
@@ -8,6 +8,7 @@ import { AgentRegistry } from '@/agents';
 import { toolSessionManager } from '@/services/toolSessionManager';
 import { ActiveToolsBar } from './ActiveToolsBar';
 import { ToolPickerModal } from './ToolPickerModal';
+import { ChatSidebar } from './ChatSidebar';
 
 interface TabMetadata {
   tabId: number;
@@ -31,7 +32,21 @@ interface DownloadInfo {
 }
 
 export const ChatView: React.FC = () => {
-  const { userConfig, consumeTokens, chatMessages, addChatMessage, clearChatMessages } = useAppStore();
+  const {
+    userConfig,
+    consumeTokens,
+    activeSessionId,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    getActiveSession,
+    addMessageToActiveSession,
+    createNewSession,
+    requestDebugNavigation,
+  } = useAppStore();
+
+  // Get current session messages
+  const activeSession = getActiveSession();
+  const chatMessages = useMemo(() => activeSession?.messages || [], [activeSession]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [tabs, setTabs] = useState<TabContext[]>([]);
@@ -41,6 +56,11 @@ export const ChatView: React.FC = () => {
   const [currentFile, setCurrentFile] = useState<{ name: string; content: string; info: DownloadInfo } | null>(null);
   const [availableTools, setAvailableTools] = useState<ToolDefinition[]>([]);
   const [showToolPicker, setShowToolPicker] = useState(false);
+  const [lastError, setLastError] = useState<{
+    error: string;
+    agentId?: string;
+    toolName?: string;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const addTabsDropdownRef = useRef<HTMLDivElement>(null);
   const tabSelectorRef = useRef<HTMLDivElement>(null);
@@ -233,28 +253,28 @@ export const ChatView: React.FC = () => {
             continue;
           }
 
-          // Load config from storage
+          // Load config from storage (if any)
           const storageKey = `plugin:${clientId}`;
           const data = await chrome.storage.local.get(storageKey);
           const pluginConfig = data[storageKey];
 
           if (pluginConfig?.config) {
             pluginInstance.setConfig(pluginConfig.config);
+          }
 
-            // Resolve dependencies
-            const dependencies = pluginInstance.getDependencies();
-            for (const dep of dependencies) {
-              const depInstance = ClientRegistry.getInstance(dep);
-              if (depInstance) {
-                const clientStorageKey = `client:${dep}`;
-                const clientData = await chrome.storage.local.get(clientStorageKey);
-                const clientConfig = clientData[clientStorageKey];
+          // Always resolve dependencies (not gated behind config)
+          const dependencies = pluginInstance.getDependencies();
+          for (const dep of dependencies) {
+            const depInstance = ClientRegistry.getInstance(dep);
+            if (depInstance) {
+              const clientStorageKey = `client:${dep}`;
+              const clientData = await chrome.storage.local.get(clientStorageKey);
+              const clientConfig = clientData[clientStorageKey];
 
-                if (clientConfig?.credentials) {
-                  depInstance.setCredentials(clientConfig.credentials);
-                  await depInstance.initialize();
-                  pluginInstance.setDependency(dep, depInstance);
-                }
+              if (clientConfig?.credentials) {
+                depInstance.setCredentials(clientConfig.credentials);
+                await depInstance.initialize();
+                pluginInstance.setDependency(dep, depInstance);
               }
             }
           }
@@ -412,21 +432,31 @@ export const ChatView: React.FC = () => {
   const handleSend = async () => {
     if (!input.trim() || loading) return;
 
-    const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: input.trim(),
-      timestamp: Date.now(),
-    };
+    // Ensure we have an active session
+    if (!activeSessionId) {
+      createNewSession();
+    }
 
-    addChatMessage(userMessage);
+    const userMessageContent = input.trim();
+
+    // Add message to active session
+    const userMessage = addMessageToActiveSession({
+      role: 'user',
+      content: userMessageContent,
+    });
+
+    if (!userMessage) {
+      console.error('[ChatView] Failed to add user message to session');
+      return;
+    }
+
     setInput('');
     setLoading(true);
 
     // Log user request clearly
     console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #2196F3');
     console.log('%c👤 USER REQUEST:', 'color: #2196F3; font-weight: bold; font-size: 14px');
-    console.log(input.trim());
+    console.log(userMessageContent);
     console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #2196F3');
 
     try {
@@ -515,9 +545,29 @@ export const ChatView: React.FC = () => {
       }
 
       // Build conversation history for agentic loop
-      const conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }> = [
-        { role: 'user', content: contextPrompt },
-      ];
+      // Include previous messages from the session for context (limit to last 20 for token management)
+      const conversationHistory: Array<{ role: 'user' | 'assistant'; content: any }> = [];
+
+      // Get current session and add previous messages (excluding welcome message)
+      const currentSession = getActiveSession();
+      if (currentSession) {
+        const previousMessages = currentSession.messages
+          .filter((m) => m.id !== 'welcome' && m.id !== userMessage.id)
+          .slice(-20); // Last 20 messages for context
+
+        for (const msg of previousMessages) {
+          conversationHistory.push({
+            role: msg.role,
+            content: msg.content,
+          });
+        }
+      }
+
+      // Add current user message with full context
+      conversationHistory.push({
+        role: 'user',
+        content: contextPrompt,
+      });
 
       let finalResponse = '';
       let totalTokens = 0;
@@ -581,6 +631,25 @@ export const ChatView: React.FC = () => {
         iteration++;
         console.log(`[ChatView] Agentic loop iteration ${iteration}`);
 
+        // Debug: Log full prompt being sent to API
+        const debugPayload = {
+          conversationHistory,
+          tools: availableTools,
+          systemPrompt: buildSystemPrompt(),
+        };
+        const payloadJson = JSON.stringify(debugPayload, null, 2);
+        const estimatedTokens = Math.ceil(payloadJson.length / 4);
+        console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #FF9800');
+        console.log('%c📦 API PAYLOAD DEBUG (Iteration ' + iteration + ')', 'color: #FF9800; font-weight: bold;');
+        console.log(`Estimated tokens: ~${estimatedTokens.toLocaleString()} (${payloadJson.length.toLocaleString()} chars)`);
+        console.log('Full payload (copy from below):');
+        console.log(payloadJson);
+        console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #FF9800');
+
+        // Debug: Store payload in window for easy copying
+        (window as any).lastApiPayload = payloadJson;
+        console.log('%c💾 To copy payload, run in console: copy(window.lastApiPayload)', 'color: #4CAF50');
+
         // Call API service with tools
         const response = await apiService.generateContent(
           {
@@ -607,21 +676,42 @@ export const ChatView: React.FC = () => {
 
         for (const toolUse of response.toolUses) {
           try {
-            // Add status message to show what tool is running
-            const statusMessage: ChatMessage = {
-              id: `status-${Date.now()}`,
-              role: 'assistant',
-              content: `⚙️ Executing: ${toolUse.name}... (iteration ${iteration}/${maxIterations})`,
-              timestamp: Date.now(),
-            };
-            addChatMessage(statusMessage);
+            // Add temporary status message to show what tool is running
+            const statusId = `status-${Date.now()}`;
+            const statusSession = getActiveSession();
+            if (statusSession) {
+              useAppStore.setState((state) => ({
+                chatSessions: state.chatSessions.map((s) =>
+                  s.id === statusSession.id
+                    ? {
+                        ...s,
+                        messages: [
+                          ...s.messages,
+                          {
+                            id: statusId,
+                            role: 'assistant' as const,
+                            content: `⚙️ Executing: ${toolUse.name}... (iteration ${iteration}/${maxIterations})`,
+                            timestamp: Date.now(),
+                          },
+                        ],
+                      }
+                    : s
+                ),
+              }));
+            }
 
             const result = await executeToolCall(toolUse.name, toolUse.input);
 
-            // Remove status message
-            useAppStore.setState(state => ({
-              chatMessages: state.chatMessages.filter(m => m.id !== statusMessage.id)
-            }));
+            // Remove status message from session
+            if (statusSession) {
+              useAppStore.setState((state) => ({
+                chatSessions: state.chatSessions.map((s) =>
+                  s.id === statusSession.id
+                    ? { ...s, messages: s.messages.filter((m) => m.id !== statusId) }
+                    : s
+                ),
+              }));
+            }
 
             // Format result for AI - highlight persistent features if present
             let resultContent = JSON.stringify(result, null, 2);
@@ -677,14 +767,11 @@ export const ChatView: React.FC = () => {
         finalResponse += '\n\n⚠️ Note: Reached maximum iteration limit. The task may be incomplete. If needed, you can ask me to continue or try the request again.';
       }
 
-      const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
+      // Add assistant response to the session
+      addMessageToActiveSession({
         role: 'assistant',
         content: finalResponse,
-        timestamp: Date.now(),
-      };
-
-      addChatMessage(assistantMessage);
+      });
 
       // Log AI response clearly
       console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #4CAF50');
@@ -700,13 +787,19 @@ export const ChatView: React.FC = () => {
         consumeTokens(totalTokens);
       }
     } catch (error) {
-      const errorMessage: ChatMessage = {
-        id: `error-${Date.now()}`,
+      const errorMessage = error instanceof Error ? error.message : 'Failed to get response';
+
+      // Track error for debug option
+      setLastError({
+        error: errorMessage,
+        // These could be populated if we track which agent/tool was being used
+      });
+
+      // Add error message to the session with debug prompt
+      addMessageToActiveSession({
         role: 'assistant',
-        content: `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`,
-        timestamp: Date.now(),
-      };
-      addChatMessage(errorMessage);
+        content: `Error: ${errorMessage}\n\nWould you like to debug this issue?`,
+      });
       console.error('Chat error:', error);
     } finally {
       setLoading(false);
@@ -721,8 +814,8 @@ export const ChatView: React.FC = () => {
   };
 
   const handleClearChat = () => {
-    if (confirm('Clear chat history?')) {
-      clearChatMessages();
+    if (confirm('Start a new chat?')) {
+      createNewSession();
       setCurrentFile(null);
     }
   };
@@ -761,10 +854,22 @@ export const ChatView: React.FC = () => {
   const selectedTabs = tabs.filter(t => t.selected);
   const singleTabSelected = selectedTabs.length === 1;
 
+  const handleToggleSidebar = () => {
+    setSidebarCollapsed(!sidebarCollapsed);
+  };
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Tab Context Selector */}
-      <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex-shrink-0 relative">
+    <div className="flex h-full">
+      {/* Chat Sidebar */}
+      <ChatSidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={handleToggleSidebar}
+      />
+
+      {/* Main Chat Area */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Tab Context Selector */}
+        <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex-shrink-0 relative">
         <div className="flex items-center justify-between gap-2">
           {/* Left side: Tab info */}
           {singleTabSelected ? (
@@ -891,27 +996,56 @@ export const ChatView: React.FC = () => {
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {chatMessages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+        {chatMessages.map((message, index) => {
+          const isError = message.content.startsWith('Error:');
+          const isLastMessage = index === chatMessages.length - 1;
+          const showDebugButton = isError && isLastMessage && lastError;
+
+          return (
             <div
-              className={`max-w-[85%] rounded-lg px-4 py-2 ${
-                message.role === 'user'
-                  ? 'bg-primary-600 text-white'
-                  : message.content.startsWith('Error:')
-                  ? 'bg-red-50 text-red-900 border border-red-200'
-                  : 'bg-gray-100 text-gray-900'
-              }`}
+              key={message.id}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-              <p className="text-xs mt-1 opacity-70">
-                {new Date(message.timestamp).toLocaleTimeString()}
-              </p>
+              <div
+                className={`max-w-[85%] rounded-lg px-4 py-2 ${
+                  message.role === 'user'
+                    ? 'bg-primary-600 text-white'
+                    : isError
+                    ? 'bg-red-50 text-red-900 border border-red-200'
+                    : 'bg-gray-100 text-gray-900'
+                }`}
+              >
+                <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                <p className="text-xs mt-1 opacity-70">
+                  {new Date(message.timestamp).toLocaleTimeString()}
+                </p>
+                {showDebugButton && (
+                  <div className="mt-3 pt-3 border-t border-red-200">
+                    <button
+                      onClick={() => {
+                        if (lastError) {
+                          requestDebugNavigation({
+                            error: lastError.error,
+                            agentId: lastError.agentId,
+                            toolName: lastError.toolName,
+                            timestamp: Date.now(),
+                          });
+                          setLastError(null);
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Debug in Editor
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {loading && (
           <div className="flex justify-start">
             <div className="bg-gray-100 rounded-lg px-4 py-2">
@@ -1008,19 +1142,20 @@ export const ChatView: React.FC = () => {
         </div>
       </div>
 
-      {/* File Analysis Modal */}
-      {showFileAnalysis && (
-        <FileAnalysis
-          onFileSelected={handleFileSelected}
-          onClose={() => setShowFileAnalysis(false)}
-        />
-      )}
+        {/* File Analysis Modal */}
+        {showFileAnalysis && (
+          <FileAnalysis
+            onFileSelected={handleFileSelected}
+            onClose={() => setShowFileAnalysis(false)}
+          />
+        )}
 
-      {/* Tool Picker Modal */}
-      <ToolPickerModal
-        isOpen={showToolPicker}
-        onClose={() => setShowToolPicker(false)}
-      />
+        {/* Tool Picker Modal */}
+        <ToolPickerModal
+          isOpen={showToolPicker}
+          onClose={() => setShowToolPicker(false)}
+        />
+      </div>
     </div>
   );
 };

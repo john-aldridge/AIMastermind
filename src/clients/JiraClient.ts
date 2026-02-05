@@ -77,6 +77,18 @@ export class JiraClient extends APIClientBase {
             required: false,
             default: 0,
           },
+          {
+            name: 'fields',
+            type: 'string',
+            description: 'Comma-separated list of fields to return (e.g., "key,summary,status,comment"). If omitted, returns default fields.',
+            required: false,
+          },
+          {
+            name: 'expand',
+            type: 'string',
+            description: 'Fields to expand (e.g., "renderedFields,changelog")',
+            required: false,
+          },
         ],
       },
       {
@@ -88,6 +100,12 @@ export class JiraClient extends APIClientBase {
             type: 'string',
             description: 'Issue key (e.g., "PROJ-123")',
             required: true,
+          },
+          {
+            name: 'fields',
+            type: 'string',
+            description: 'Comma-separated list of fields to return (e.g., "summary,status,comment")',
+            required: false,
           },
           {
             name: 'expand',
@@ -192,6 +210,11 @@ export class JiraClient extends APIClientBase {
             required: true,
           },
         ],
+      },
+      {
+        name: 'jira_get_fields',
+        description: 'Get all available fields in this Jira instance. Use this to discover custom fields and their IDs.',
+        parameters: [],
       },
     ];
   }
@@ -318,6 +341,9 @@ export class JiraClient extends APIClientBase {
         case 'jira_add_comment':
           result = await this.addComment(parameters);
           break;
+        case 'jira_get_fields':
+          result = await this.getFields();
+          break;
         default:
           throw new Error(`Unknown capability: ${capabilityName}`);
       }
@@ -343,19 +369,36 @@ export class JiraClient extends APIClientBase {
   // Implementation methods
 
   private async search(params: any): Promise<any> {
-    const { jql, maxResults = 50, startAt = 0 } = params;
+    const { jql, maxResults = 50, startAt = 0, fields, expand } = params;
 
-    const url = `${this.baseUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&startAt=${startAt}`;
+    let url = `${this.baseUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&startAt=${startAt}`;
+
+    if (fields) {
+      url += `&fields=${encodeURIComponent(fields)}`;
+    }
+    if (expand) {
+      url += `&expand=${encodeURIComponent(expand)}`;
+    }
+
     const response = await this.makeRequest(url);
     return response.json();
   }
 
   private async getIssue(params: any): Promise<any> {
-    const { issueKey, expand } = params;
+    const { issueKey, expand, fields } = params;
 
     let url = `${this.baseUrl}/rest/api/2/issue/${issueKey}`;
+    const queryParams: string[] = [];
+
     if (expand) {
-      url += `?expand=${expand}`;
+      queryParams.push(`expand=${encodeURIComponent(expand)}`);
+    }
+    if (fields) {
+      queryParams.push(`fields=${encodeURIComponent(fields)}`);
+    }
+
+    if (queryParams.length > 0) {
+      url += `?${queryParams.join('&')}`;
     }
 
     const response = await this.makeRequest(url);
@@ -446,6 +489,11 @@ export class JiraClient extends APIClientBase {
       }
     );
 
+    return response.json();
+  }
+
+  private async getFields(): Promise<any> {
+    const response = await this.makeRequest(`${this.baseUrl}/rest/api/2/field`);
     return response.json();
   }
 }

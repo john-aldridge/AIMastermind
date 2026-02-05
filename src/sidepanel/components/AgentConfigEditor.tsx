@@ -94,14 +94,20 @@ export const AgentConfigEditor: React.FC<AgentConfigEditorProps> = ({
       await agentInstance.initialize();
       console.log('[PluginConfigEditor] Plugin initialized successfully');
 
-      // Save to chrome storage
+      // Save to chrome storage (default to inactive - user must explicitly activate)
       setStatusMessage('Saving configuration...');
       console.log('[PluginConfigEditor] Saving to chrome storage...');
+
+      // Preserve existing isActive state if reconfiguring, otherwise default to false
+      const existingData = await chrome.storage.local.get(`plugin:${agent.id}`);
+      const existingConfig = existingData[`plugin:${agent.id}`];
+      const preserveIsActive = existingConfig?.isActive ?? false;
+
       await chrome.storage.local.set({
-        [`agent:${agent.id}`]: {
+        [`plugin:${agent.id}`]: {
           agentId: agent.id,
           config,
-          isActive: true,
+          isActive: preserveIsActive,
           configuredAt: Date.now(),
         },
       });

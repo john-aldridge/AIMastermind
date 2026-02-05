@@ -18,6 +18,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onUpdate }) => {
   const [expanded, setExpanded] = useState(false);
   const [showConfigEditor, setShowConfigEditor] = useState(false);
   const [isConfigured, setIsConfigured] = useState(false);
+  const [isActive, setIsActive] = useState(false);
   const [hasDependencies, setHasDependencies] = useState(false);
 
   useEffect(() => {
@@ -30,11 +31,41 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onUpdate }) => {
     const data = await chrome.storage.local.get(storageKey);
     const config = data[storageKey];
 
-    setIsConfigured(!!config?.config && Object.keys(config.config).length > 0);
+    // Get the agent's config fields to check which are required
+    const instance = AgentRegistry.getInstance(agent.id);
+    const configFields = instance?.getConfigFields() || [];
+    const requiredFields = configFields.filter(f => f.required);
+
+    // Agent is configured if:
+    // 1. It has no required config fields, OR
+    // 2. All required config fields are filled in
+    const hasNoRequiredFields = requiredFields.length === 0;
+    const allRequiredFieldsFilled = requiredFields.every(
+      field => config?.config?.[field.key]
+    );
+
+    setIsConfigured(hasNoRequiredFields || allRequiredFieldsFilled);
+    setIsActive(!!config?.isActive);
 
     // Check dependencies
     const canResolve = AgentRegistry.canResolveDependencies(agent.id);
     setHasDependencies(canResolve);
+  };
+
+  const toggleAgentActive = async () => {
+    const storageKey = `plugin:${agent.id}`;
+    const data = await chrome.storage.local.get(storageKey);
+    const config = data[storageKey] || {};
+
+    const newIsActive = !config.isActive;
+    await chrome.storage.local.set({
+      [storageKey]: {
+        ...config,
+        isActive: newIsActive,
+      },
+    });
+
+    setIsActive(newIsActive);
   };
 
   const agentInstance = AgentRegistry.getInstance(agent.id);
@@ -52,11 +83,6 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onUpdate }) => {
               {!isConfigured && (
                 <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
                   Not Configured
-                </span>
-              )}
-              {isConfigured && (
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
-                  Configured
                 </span>
               )}
               {!hasDependencies && (
@@ -79,6 +105,36 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onUpdate }) => {
               )}
             </div>
           </div>
+
+          {/* Active/Inactive Toggle - always visible, disabled if not configured or missing deps */}
+          {(() => {
+            const canToggle = isConfigured && hasDependencies;
+            const disabledReason = !hasDependencies
+              ? 'Configure required clients first'
+              : !isConfigured
+              ? 'Configure agent first'
+              : '';
+            return (
+              <button
+                onClick={() => canToggle && toggleAgentActive()}
+                disabled={!canToggle}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${
+                  !canToggle
+                    ? 'bg-gray-200 cursor-not-allowed opacity-50'
+                    : isActive
+                    ? 'bg-purple-500'
+                    : 'bg-gray-300'
+                }`}
+                title={!canToggle ? disabledReason : isActive ? 'Active - click to deactivate' : 'Inactive - click to activate'}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    isActive ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            );
+          })()}
         </div>
 
         <div className="flex gap-2 mt-3">

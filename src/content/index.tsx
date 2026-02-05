@@ -8,7 +8,15 @@ import { initializeProcessRegistry, getProcessRegistry } from '@/utils/processRe
 
 // Track monitoring state
 let interceptorInjected = false;
+let consoleInterceptorInjected = false;
+let messagingInterceptorInjected = false;
+let extensionMessagingIntercepted = false;
 let shouldForwardNetworkData = false;
+let shouldForwardConsoleData = false;
+let shouldForwardMessagingData = false;
+
+// Store original chrome.runtime methods for extension messaging interception
+const originalChromeRuntimeSendMessage = chrome.runtime?.sendMessage?.bind(chrome.runtime);
 
 // Inject network interceptor into page context (only when needed)
 const injectInterceptor = () => {
@@ -31,6 +39,108 @@ const injectInterceptor = () => {
   } catch (error) {
     console.error('%c[Synergy AI] Error injecting interceptor script:', error, 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;');
   }
+};
+
+// Inject console interceptor into page context
+const injectConsoleInterceptor = () => {
+  if (consoleInterceptorInjected) return;
+
+  try {
+    const script = document.createElement('script');
+    const interceptorUrl = chrome.runtime.getURL('content/consoleInterceptor.js');
+
+    script.src = interceptorUrl;
+    script.onload = () => {
+      console.log('%c[Synergy AI] Console interceptor injected', 'background: #2196F3; color: white; padding: 2px 5px; border-radius: 3px;');
+      script.remove();
+      consoleInterceptorInjected = true;
+    };
+    script.onerror = (error) => {
+      console.error('%c[Synergy AI] Failed to load console interceptor', 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;', error);
+    };
+    (document.head || document.documentElement).appendChild(script);
+  } catch (error) {
+    console.error('%c[Synergy AI] Error injecting console interceptor:', error, 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;');
+  }
+};
+
+// Inject messaging interceptor into page context
+const injectMessagingInterceptor = () => {
+  if (messagingInterceptorInjected) return;
+
+  try {
+    const script = document.createElement('script');
+    const interceptorUrl = chrome.runtime.getURL('content/messagingInterceptor.js');
+
+    script.src = interceptorUrl;
+    script.onload = () => {
+      console.log('%c[Synergy AI] Messaging interceptor injected', 'background: #9C27B0; color: white; padding: 2px 5px; border-radius: 3px;');
+      script.remove();
+      messagingInterceptorInjected = true;
+    };
+    script.onerror = (error) => {
+      console.error('%c[Synergy AI] Failed to load messaging interceptor', 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;', error);
+    };
+    (document.head || document.documentElement).appendChild(script);
+  } catch (error) {
+    console.error('%c[Synergy AI] Error injecting messaging interceptor:', error, 'background: #F44336; color: white; padding: 2px 5px; border-radius: 3px;');
+  }
+};
+
+// Intercept chrome.runtime messaging (for monitoring extension communication)
+const interceptExtensionMessaging = () => {
+  if (extensionMessagingIntercepted || !originalChromeRuntimeSendMessage) return;
+
+  // Helper to safely stringify
+  const safeStringify = (obj: any, maxLength = 5000): string => {
+    try {
+      if (typeof obj === 'string') return obj.length > maxLength ? obj.substring(0, maxLength) + '...' : obj;
+      const str = JSON.stringify(obj);
+      return str.length > maxLength ? str.substring(0, maxLength) + '...' : str;
+    } catch {
+      return '[Unable to stringify]';
+    }
+  };
+
+  // Intercept chrome.runtime.sendMessage
+  (chrome.runtime as any).sendMessage = function(
+    messageOrExtensionId: any,
+    optionsOrMessage?: any,
+    responseCallback?: any
+  ) {
+    // Determine the actual message (handle both signatures)
+    const message = typeof messageOrExtensionId === 'string' ? optionsOrMessage : messageOrExtensionId;
+
+    // Don't intercept our own monitoring messages
+    const isMonitoringMessage = message?.type?.includes?.('MESSAGING') ||
+                                message?.type?.includes?.('CONSOLE') ||
+                                message?.type?.includes?.('NETWORK') ||
+                                message?.type?.includes?.('MONITORING');
+
+    if (!isMonitoringMessage && shouldForwardMessagingData) {
+      // Forward to background (using original to avoid recursion)
+      originalChromeRuntimeSendMessage({
+        type: MessageType.MESSAGING_DATA_INTERCEPTED,
+        payload: {
+          type: 'ExtensionMessage',
+          direction: 'outgoing',
+          target: 'runtime',
+          message: safeStringify(message),
+          messageType: message?.type,
+          timestamp: Date.now(),
+        }
+      }).catch(() => {});
+    }
+
+    // Call original with the same arguments
+    if (typeof messageOrExtensionId === 'string') {
+      return originalChromeRuntimeSendMessage(messageOrExtensionId, optionsOrMessage, responseCallback);
+    }
+    return originalChromeRuntimeSendMessage(messageOrExtensionId, optionsOrMessage);
+  };
+
+  extensionMessagingIntercepted = true;
+  console.log('%c[Synergy AI] Extension messaging interceptor enabled', 'background: #E91E63; color: white; padding: 2px 5px; border-radius: 3px;');
 };
 
 // Check if monitoring level requires network interception
@@ -57,17 +167,59 @@ const initializeMonitoringState = async () => {
   }
 };
 
+// Initialize console monitoring state
+const initializeConsoleMonitoringState = async () => {
+  try {
+    if (!chrome.runtime?.id) return;
+    const response = await chrome.runtime.sendMessage({
+      type: MessageType.GET_CONSOLE_MONITORING_LEVEL
+    });
+    if (response?.success && response.data) {
+      const level = response.data;
+      // Enable for 'extension' or 'full' levels
+      shouldForwardConsoleData = level === 'extension' || level === 'full';
+      if (shouldForwardConsoleData) {
+        // Inject console interceptor to capture page console logs
+        // This works without debugger permission by running in page context
+        injectConsoleInterceptor();
+      }
+    }
+  } catch (err) {
+    // Silently ignore - extension context may be invalidated
+  }
+};
+
+// Initialize messaging monitoring state
+const initializeMessagingMonitoringState = async () => {
+  try {
+    if (!chrome.runtime?.id) return;
+    const response = await chrome.runtime.sendMessage({
+      type: MessageType.GET_MESSAGING_MONITORING_ENABLED
+    });
+    if (response?.success && response.data) {
+      shouldForwardMessagingData = response.data === true;
+      if (shouldForwardMessagingData) {
+        injectMessagingInterceptor();
+        interceptExtensionMessaging();
+      }
+    }
+  } catch (err) {
+    // Silently ignore - extension context may be invalidated
+  }
+};
+
 // Initialize on load
 initializeMonitoringState();
+initializeConsoleMonitoringState();
+initializeMessagingMonitoringState();
 
-// Listen for intercepted network data from page context
+// Listen for intercepted data from page context
 window.addEventListener('message', (event) => {
-  // Only accept messages from same origin and our interceptor
-  if (event.source !== window || event.data.source !== 'ai-mastermind-interceptor') {
-    return;
-  }
+  // Only accept messages from same origin
+  if (event.source !== window) return;
 
-  if (event.data.type === 'NETWORK_INTERCEPTED') {
+  // Handle network interception
+  if (event.data.source === 'ai-mastermind-interceptor' && event.data.type === 'NETWORK_INTERCEPTED') {
     // Skip if monitoring level doesn't require network data
     if (!shouldForwardNetworkData) {
       return;
@@ -77,19 +229,92 @@ window.addEventListener('message', (event) => {
 
     // Check if extension context is still valid
     if (!chrome.runtime?.id) {
-      // Extension context invalidated (extension was reloaded/updated)
-      // Silently ignore - this is expected during development
       return;
     }
+
+    // Determine if this is the top frame or an iframe
+    const isTopFrame = window === window.top;
 
     // Forward to background script (no verbose logging)
     chrome.runtime.sendMessage({
       type: MessageType.NETWORK_DATA_INTERCEPTED,
-      payload: data
+      payload: {
+        ...data,
+        frameType: isTopFrame ? 'top' : 'iframe',
+        isIframe: !isTopFrame,
+        frameUrl: window.location.href,
+      }
     }).catch(err => {
-      // Only log if it's not a context invalidation error
       if (!err.message?.includes('Extension context invalidated')) {
         console.error('[Content] Error forwarding network data:', err);
+      }
+    });
+  }
+
+  // Handle console interception
+  if (event.data.source === 'ai-mastermind-console' && event.data.type === 'CONSOLE_INTERCEPTED') {
+    // Skip if console monitoring is disabled
+    if (!shouldForwardConsoleData) {
+      return;
+    }
+
+    const data = event.data.data;
+
+    // Check if extension context is still valid
+    if (!chrome.runtime?.id) {
+      return;
+    }
+
+    // Determine if this is the top frame or an iframe
+    const isTopFrame = window === window.top;
+    const frameInfo = isTopFrame ? 'top' : 'iframe';
+
+    // Forward to background/sidepanel
+    chrome.runtime.sendMessage({
+      type: MessageType.CONSOLE_LOG,
+      payload: {
+        ...data,
+        frameType: frameInfo,
+        isIframe: !isTopFrame,
+        source: 'page',
+        url: window.location.href,
+      }
+    }).catch(err => {
+      if (!err.message?.includes('Extension context invalidated')) {
+        // Silently ignore console forwarding errors
+      }
+    });
+  }
+
+  // Handle messaging interception (postMessage, MessageChannel, BroadcastChannel)
+  if (event.data.source === 'ai-mastermind-messaging' && event.data.type === 'MESSAGING_INTERCEPTED') {
+    // Skip if messaging monitoring is disabled
+    if (!shouldForwardMessagingData) {
+      return;
+    }
+
+    const data = event.data.data;
+
+    // Check if extension context is still valid
+    if (!chrome.runtime?.id) {
+      return;
+    }
+
+    // Determine if this is the top frame or an iframe
+    const isTopFrame = window === window.top;
+
+    // Forward to background
+    chrome.runtime.sendMessage({
+      type: MessageType.MESSAGING_DATA_INTERCEPTED,
+      payload: {
+        ...data,
+        frameType: isTopFrame ? 'top' : 'iframe',
+        isIframe: !isTopFrame,
+        frameUrl: window.location.href,
+      }
+    }).catch(err => {
+      if (!err.message?.includes('Extension context invalidated')) {
+        // Silently ignore messaging forwarding errors
       }
     });
   }
@@ -117,6 +342,51 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (wasForwarding !== shouldForwardNetworkData) {
         console.log(`%c[Synergy AI] Network monitoring ${shouldForwardNetworkData ? 'enabled' : 'disabled'}`,
           `background: ${shouldForwardNetworkData ? '#4CAF50' : '#FF9800'}; color: white; padding: 2px 5px; border-radius: 3px;`);
+      }
+
+      sendResponse({ success: true });
+      return false;
+    }
+
+    // Handle console monitoring level changes
+    if (message.type === MessageType.CONSOLE_MONITORING_LEVEL_CHANGED) {
+      const level = message.level;
+      const wasForwarding = shouldForwardConsoleData;
+      shouldForwardConsoleData = level === 'extension' || level === 'full';
+
+      // Inject console interceptor if enabled and not yet injected
+      if (shouldForwardConsoleData && !consoleInterceptorInjected) {
+        injectConsoleInterceptor();
+      }
+
+      if (wasForwarding !== shouldForwardConsoleData) {
+        console.log(`%c[Synergy AI] Console monitoring ${shouldForwardConsoleData ? 'enabled' : 'disabled'}`,
+          `background: ${shouldForwardConsoleData ? '#2196F3' : '#FF9800'}; color: white; padding: 2px 5px; border-radius: 3px;`);
+      }
+
+      sendResponse({ success: true });
+      return false;
+    }
+
+    // Handle messaging monitoring changes
+    if (message.type === MessageType.MESSAGING_MONITORING_CHANGED) {
+      const enabled = message.enabled;
+      const wasForwarding = shouldForwardMessagingData;
+      shouldForwardMessagingData = enabled === true;
+
+      // Inject messaging interceptor if enabled and not yet injected
+      if (shouldForwardMessagingData && !messagingInterceptorInjected) {
+        injectMessagingInterceptor();
+      }
+
+      // Enable extension messaging interception
+      if (shouldForwardMessagingData && !extensionMessagingIntercepted) {
+        interceptExtensionMessaging();
+      }
+
+      if (wasForwarding !== shouldForwardMessagingData) {
+        console.log(`%c[Synergy AI] Messaging monitoring ${shouldForwardMessagingData ? 'enabled' : 'disabled'}`,
+          `background: ${shouldForwardMessagingData ? '#9C27B0' : '#FF9800'}; color: white; padding: 2px 5px; border-radius: 3px;`);
       }
 
       sendResponse({ success: true });
@@ -243,6 +513,13 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // Create a container for the extension content
 const initializeContentScript = () => {
+  // Only initialize full content script UI in top frame
+  // Iframes still get console/network interception but not the React overlay
+  if (window !== window.top) {
+    console.log('%c[Synergy AI] Iframe detected - skipping UI initialization', 'background: #607D8B; color: white; padding: 2px 5px; border-radius: 3px;');
+    return;
+  }
+
   // Check if already initialized
   if (document.getElementById('ai-mastermind-root')) {
     console.log('%c[Synergy AI] Content script already initialized', 'background: #FF9800; color: white; padding: 2px 5px; border-radius: 3px;');

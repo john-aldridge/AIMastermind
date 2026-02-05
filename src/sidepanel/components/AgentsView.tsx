@@ -44,6 +44,10 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
   const newAgentDropdownRef = useRef<HTMLDivElement>(null);
   const editDropdownRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
+  // View split button state
+  const [activeViewDropdown, setActiveViewDropdown] = useState<string | null>(null);
+  const viewDropdownRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
   // Run split button state
   const [activeRunDropdown, setActiveRunDropdown] = useState<string | null>(null);
   const [showRunConfirmModal, setShowRunConfirmModal] = useState(false);
@@ -104,6 +108,12 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
           setActiveRunDropdown(null);
         }
       }
+      if (activeViewDropdown) {
+        const ref = viewDropdownRefs.current.get(activeViewDropdown);
+        if (ref && !ref.contains(event.target as Node)) {
+          setActiveViewDropdown(null);
+        }
+      }
       if (showTabDropdown && tabDropdownRef.current && !tabDropdownRef.current.contains(event.target as Node)) {
         setShowTabDropdown(false);
       }
@@ -113,6 +123,7 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
       setShowNewAgentDropdown(false);
       setActiveEditDropdown(null);
       setActiveRunDropdown(null);
+      setActiveViewDropdown(null);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -121,7 +132,7 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [showNewAgentDropdown, activeEditDropdown, activeRunDropdown, showTabDropdown]);
+  }, [showNewAgentDropdown, activeEditDropdown, activeRunDropdown, activeViewDropdown, showTabDropdown]);
 
   const loadAgents = async () => {
     // Load built-in agents
@@ -391,52 +402,95 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
     setRunResult(null);
   };
 
-  // Render run split button for an agent (matches EditorApp green style)
+  // Render run dropdown button for an agent
   const renderRunSplitButton = (config: AgentConfig) => {
     const dropdownKey = `run-${config.id}`;
     const isDropdownOpen = activeRunDropdown === dropdownKey;
 
     return (
       <div
-        className="relative flex"
+        className="relative"
         ref={(el) => { if (el) runDropdownRefs.current.set(dropdownKey, el); }}
       >
         <button
-          onClick={() => openRunConfirmModal(config)}
+          onClick={() => setActiveRunDropdown(isDropdownOpen ? null : dropdownKey)}
           disabled={isRunning || config.capabilities.length === 0}
-          className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-l hover:bg-green-700 transition-colors flex items-center gap-1 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Run agent"
+          className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded hover:bg-green-700 transition-colors flex items-center gap-1 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-            />
-          </svg>
           Run
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {isDropdownOpen && (
+          <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+            <button
+              onClick={() => {
+                openRunConfirmModal(config);
+                setActiveRunDropdown(null);
+              }}
+              className="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100 rounded-t-lg"
+            >
+              Run
+            </button>
+            <button
+              onClick={() => {
+                openRunConfigModal(config);
+                setActiveRunDropdown(null);
+              }}
+              className="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100 rounded-b-lg"
+            >
+              Configure and Run
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render view split button for an agent
+  const renderViewSplitButton = (agentId: string) => {
+    const dropdownKey = `view-${agentId}`;
+    const isDropdownOpen = activeViewDropdown === dropdownKey;
+
+    return (
+      <div
+        className="relative flex"
+        ref={(el) => { if (el) viewDropdownRefs.current.set(dropdownKey, el); }}
+      >
+        <button
+          onClick={() => openEditorInNewTab(agentId)}
+          className="px-3 py-1 text-xs font-medium bg-primary-600 text-white rounded-l hover:bg-primary-700 transition-colors whitespace-nowrap"
+        >
+          View
         </button>
         <button
-          onClick={() => setActiveRunDropdown(isDropdownOpen ? null : dropdownKey)}
-          disabled={config.capabilities.length === 0}
-          className="px-1.5 py-1 bg-green-700 text-white rounded-r hover:bg-green-800 transition-colors border-l border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => setActiveViewDropdown(isDropdownOpen ? null : dropdownKey)}
+          className="px-1.5 py-1 bg-primary-700 text-white rounded-r hover:bg-primary-800 transition-colors border-l border-primary-500"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </button>
         {isDropdownOpen && (
-          <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+          <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
             <button
-              onClick={() => openRunConfigModal(config)}
-              className="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100 rounded-lg flex items-center gap-2"
+              onClick={() => {
+                openEditorInNewTab(agentId);
+                setActiveViewDropdown(null);
+              }}
+              className="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100 rounded-t-lg"
             >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              Configure
+              View in New Tab
+            </button>
+            <button
+              onClick={() => {
+                openEditorInSidepanel(agentId);
+                setActiveViewDropdown(null);
+              }}
+              className="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-100 rounded-b-lg"
+            >
+              View in Sidepanel
             </button>
           </div>
         )}
@@ -515,12 +569,9 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
             </div>
             <div className="relative flex" ref={newAgentDropdownRef}>
               <button
-                onClick={() => onOpenEditor ? handleCreateNewAgentInSidepanel() : handleCreateNewAgentInNewTab()}
-                className="px-4 py-2 bg-primary-600 text-white rounded-l-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
+                onClick={handleCreateNewAgentInNewTab}
+                className="px-4 py-2 bg-primary-600 text-white rounded-l-lg hover:bg-primary-700 transition-colors"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
                 New Agent
               </button>
               <button
@@ -532,24 +583,18 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
                 </svg>
               </button>
               {showNewAgentDropdown && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                  <button
-                    onClick={handleCreateNewAgentInSidepanel}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 rounded-t-lg flex items-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-                    </svg>
-                    Open in Sidepanel
-                  </button>
+                <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
                   <button
                     onClick={handleCreateNewAgentInNewTab}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 rounded-b-lg flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 rounded-t-lg"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
                     Open in New Tab
+                  </button>
+                  <button
+                    onClick={handleCreateNewAgentInSidepanel}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 rounded-b-lg"
+                  >
+                    Open in Sidepanel
                   </button>
                 </div>
               )}
@@ -561,13 +606,11 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
             {customAgents.map((agent) => (
               <div
                 key={agent.agentId}
-                className="bg-white rounded-lg border border-gray-200 p-4 hover:border-primary-300 transition-colors"
+                className="bg-white rounded-lg border border-gray-200 p-4 hover:border-primary-300 transition-colors cursor-pointer"
+                onClick={() => openEditorInNewTab(agent.agentId)}
               >
                 <div className="flex items-start justify-between">
-                  <div
-                    className="flex-1 cursor-pointer"
-                    onClick={() => openEditorInSidepanel(agent.agentId)}
-                  >
+                  <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-semibold text-gray-900">{agent.name}</h4>
                       <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">
@@ -588,12 +631,10 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
                   <div
                     className="relative"
                     ref={(el) => { if (el) editDropdownRefs.current.set(agent.agentId, el); }}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveEditDropdown(activeEditDropdown === agent.agentId ? null : agent.agentId);
-                      }}
+                      onClick={() => setActiveEditDropdown(activeEditDropdown === agent.agentId ? null : agent.agentId)}
                       className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -631,13 +672,11 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
             {configAgents.map((config) => (
               <div
                 key={config.id}
-                className="bg-white rounded-lg border border-gray-200 p-4 hover:border-green-300 transition-colors"
+                className="bg-white rounded-lg border border-gray-200 p-4 hover:border-green-300 transition-colors cursor-pointer"
+                onClick={() => openEditorInNewTab(config.id)}
               >
                 <div className="flex items-start justify-between">
-                  <div
-                    className="flex-1 cursor-pointer"
-                    onClick={() => openEditorInSidepanel(config.id)}
-                  >
+                  <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-semibold text-gray-900">{config.icon} {config.name}</h4>
                       <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">
@@ -661,47 +700,9 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
                       <span>by {config.author}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     {renderRunSplitButton(config)}
-                    <div
-                      className="relative"
-                      ref={(el) => { if (el) editDropdownRefs.current.set(`config-${config.id}`, el); }}
-                    >
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const key = `config-${config.id}`;
-                          setActiveEditDropdown(activeEditDropdown === key ? null : key);
-                        }}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                        </svg>
-                      </button>
-                      {activeEditDropdown === `config-${config.id}` && (
-                        <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                          <button
-                            onClick={() => openEditorInSidepanel(config.id)}
-                            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 rounded-t-lg flex items-center gap-2"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-                            </svg>
-                            Edit in Sidepanel
-                          </button>
-                          <button
-                            onClick={() => openEditorInNewTab(config.id)}
-                            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 rounded-b-lg flex items-center gap-2"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                            Edit in New Tab
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    {renderViewSplitButton(config.id)}
                   </div>
                 </div>
               </div>
@@ -833,13 +834,11 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
             {sampleConfigAgents.map((config) => (
               <div
                 key={config.id}
-                className="bg-white rounded-lg border border-gray-200 p-4 hover:border-amber-300 transition-colors"
+                className="bg-white rounded-lg border border-gray-200 p-4 hover:border-amber-300 transition-colors cursor-pointer"
+                onClick={() => openEditorInNewTab(config.id)}
               >
                 <div className="flex items-start justify-between">
-                  <div
-                    className="flex-1 cursor-pointer"
-                    onClick={() => openEditorInSidepanel(config.id)}
-                  >
+                  <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-semibold text-gray-900">{config.icon} {config.name}</h4>
                       <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-medium rounded">
@@ -863,17 +862,9 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
                       <span>by {config.author}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     {renderRunSplitButton(config)}
-                    <button
-                      onClick={() => openEditorInSidepanel(config.id)}
-                      className="p-2 text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                      title="View code"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                      </svg>
-                    </button>
+                    {renderViewSplitButton(config.id)}
                   </div>
                 </div>
               </div>

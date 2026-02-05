@@ -6,11 +6,13 @@ import { ConfigurationManager } from './ConfigurationManager';
 import { NetworkSettings } from './NetworkSettings';
 import { AutoLoadRulesView } from './AutoLoadRulesView';
 import { ProcessMonitorView } from './ProcessMonitorView';
+import { ConsoleSettings } from './ConsoleSettings';
+import { AdvancedDebuggingSettings } from './AdvancedDebuggingSettings';
 import { ProviderConfig, getProviderById } from '@/utils/providers';
 import { SettingsService, ExtensionSettings } from '@/services/settingsService';
 
 type NotificationType = 'success' | 'error' | null;
-type SettingsSection = 'main' | 'models' | 'network' | 'auto-load' | 'processes' | 'billing' | 'cloud-sync' | 'security';
+type SettingsSection = 'main' | 'models' | 'network' | 'console' | 'advanced-debugging' | 'auto-load' | 'processes' | 'billing' | 'cloud-sync' | 'security';
 
 export const SettingsView: React.FC = () => {
   const { userConfig, updateUserConfig, addConfiguration } = useAppStore();
@@ -226,6 +228,42 @@ export const SettingsView: React.FC = () => {
             <div className="text-left">
               <div className="font-medium text-gray-800">Network Monitoring</div>
               <div className="text-xs text-gray-500">Control network access levels</div>
+            </div>
+          </div>
+          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('console')}
+          className="w-full px-4 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors border-b border-gray-200"
+        >
+          <div className="flex items-center gap-3">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <div className="text-left">
+              <div className="font-medium text-gray-800">Console Monitoring</div>
+              <div className="text-xs text-gray-500">Capture logs for debugging</div>
+            </div>
+          </div>
+          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('advanced-debugging')}
+          className="w-full px-4 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors border-b border-gray-200"
+        >
+          <div className="flex items-center gap-3">
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            <div className="text-left">
+              <div className="font-medium text-gray-800">Advanced Debugging</div>
+              <div className="text-xs text-gray-500">DOM, Memory, CPU profiling</div>
             </div>
           </div>
           <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -743,6 +781,8 @@ export const SettingsView: React.FC = () => {
           {activeSection === 'main' && 'Settings'}
           {activeSection === 'models' && 'Models'}
           {activeSection === 'network' && 'Network Monitoring'}
+          {activeSection === 'console' && 'Console Monitoring'}
+          {activeSection === 'advanced-debugging' && 'Advanced Debugging'}
           {activeSection === 'auto-load' && 'Auto-Load Rules'}
           {activeSection === 'processes' && 'Active Processes'}
           {activeSection === 'security' && 'Security'}
@@ -755,6 +795,8 @@ export const SettingsView: React.FC = () => {
       {activeSection === 'main' && renderMainMenu()}
       {activeSection === 'models' && renderModelsSettings()}
       {activeSection === 'network' && renderNetworkSettings()}
+      {activeSection === 'console' && <ConsoleSettings />}
+      {activeSection === 'advanced-debugging' && <AdvancedDebuggingSettings />}
       {activeSection === 'auto-load' && <AutoLoadRulesView />}
       {activeSection === 'processes' && <ProcessMonitorView />}
       {activeSection === 'security' && renderSecuritySettings()}

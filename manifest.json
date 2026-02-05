@@ -5,12 +5,19 @@
   "description": "Create and manage AI-powered draggable widgets on any webpage",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "activeTab",
+    "tabs",
     "scripting",
     "sidePanel",
     "downloads",
     "notifications",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "debugger",
+    "webNavigation",
+    "alarms",
+    "offscreen"
   ],
   "optional_permissions": [
     "webRequest"
@@ -30,12 +37,13 @@
       "matches": ["<all_urls>"],
       "js": ["content/index.js"],
       "css": ["assets/style.css"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/*", "chunks/*", "content/interceptor.js"],
+      "resources": ["assets/*", "chunks/*", "content/interceptor.js", "content/consoleInterceptor.js", "content/messagingInterceptor.js"],
       "matches": ["<all_urls>"]
     }
   ]

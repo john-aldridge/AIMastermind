@@ -246,7 +246,12 @@ class ToolSessionManagerClass {
       const deps = agent.getDependencies();
       if (!deps.includes(clientId)) continue;
 
-      // Check if agent is configured
+      // Check if the underlying client dependency is configured
+      // (the agent needs the client to be set up with credentials)
+      const clientConfigured = await this.isClientConfigured(clientId);
+      if (!clientConfigured) continue;
+
+      // Check if agent is configured (its own config fields)
       const storageKey = `plugin:${agentId}`;
       const data = await chrome.storage.local.get(storageKey);
       const config = data[storageKey];
@@ -258,10 +263,7 @@ class ToolSessionManagerClass {
       const allFilled = requiredFields.every(f => config?.config?.[f.key]);
 
       if (hasNoRequired || allFilled) {
-        // Check dependencies can be resolved
-        if (AgentRegistry.canResolveDependencies(agentId)) {
-          return agentId;
-        }
+        return agentId;
       }
     }
     return null;
@@ -296,7 +298,22 @@ class ToolSessionManagerClass {
         const storageKey = `plugin:${clientId}`;
         const data = await chrome.storage.local.get(storageKey);
         const pluginConfig = data[storageKey];
-        return !!pluginConfig?.config && pluginConfig?.isActive;
+
+        // Agent is configured if it's active AND either:
+        // 1. Has no required config fields, OR
+        // 2. Has config with required fields filled
+        if (!pluginConfig?.isActive) return false;
+
+        const agentInstance = AgentRegistry.getInstance(clientId);
+        const configFields = agentInstance?.getConfigFields() || [];
+        const requiredFields = configFields.filter(f => f.required);
+
+        if (requiredFields.length === 0) {
+          return true; // No required fields, just needs to be active
+        }
+
+        // Check if all required fields are filled
+        return requiredFields.every(f => pluginConfig?.config?.[f.key]);
       }
 
       return false;

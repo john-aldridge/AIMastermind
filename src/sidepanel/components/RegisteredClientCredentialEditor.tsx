@@ -74,14 +74,20 @@ export const RegisteredClientCredentialEditor: React.FC<RegisteredClientCredenti
       await clientInstance.initialize();
       console.log('[RegisteredClientCredentialEditor] Client initialized successfully');
 
-      // Save to chrome storage
+      // Save to chrome storage (default to inactive - user must explicitly activate)
       setStatusMessage('Saving credentials...');
       console.log('[RegisteredClientCredentialEditor] Saving to chrome storage...');
+
+      // Preserve existing isActive state if reconfiguring, otherwise default to false
+      const existingData = await chrome.storage.local.get(`client:${clientMetadata.id}`);
+      const existingConfig = existingData[`client:${clientMetadata.id}`];
+      const preserveIsActive = existingConfig?.isActive ?? false;
+
       await chrome.storage.local.set({
         [`client:${clientMetadata.id}`]: {
           clientId: clientMetadata.id,
           credentials,
-          isActive: true,
+          isActive: preserveIsActive,
           configuredAt: Date.now(),
         },
       });

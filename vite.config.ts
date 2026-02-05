@@ -60,7 +60,7 @@ export default defineConfig({
           },
         });
 
-        // Build interceptor as IIFE
+        // Build network interceptor as IIFE
         await build({
           configFile: false,
           build: {
@@ -81,7 +81,49 @@ export default defineConfig({
           },
         });
 
-        console.log('✓ Built content script and interceptor as IIFE');
+        // Build console interceptor as IIFE
+        await build({
+          configFile: false,
+          build: {
+            outDir: 'dist/content',
+            emptyOutDir: false,
+            minify: false,
+            lib: {
+              entry: resolve(__dirname, 'src/content/consoleInterceptor.ts'),
+              name: 'ConsoleInterceptor',
+              formats: ['iife'],
+              fileName: () => 'consoleInterceptor.js',
+            },
+            rollupOptions: {
+              output: {
+                extend: true,
+              },
+            },
+          },
+        });
+
+        // Build messaging interceptor as IIFE
+        await build({
+          configFile: false,
+          build: {
+            outDir: 'dist/content',
+            emptyOutDir: false,
+            minify: false,
+            lib: {
+              entry: resolve(__dirname, 'src/content/messagingInterceptor.ts'),
+              name: 'MessagingInterceptor',
+              formats: ['iife'],
+              fileName: () => 'messagingInterceptor.js',
+            },
+            rollupOptions: {
+              output: {
+                extend: true,
+              },
+            },
+          },
+        });
+
+        console.log('✓ Built content script and interceptors as IIFE');
       },
     },
   ],
