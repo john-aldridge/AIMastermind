@@ -514,6 +514,21 @@ export const EditorApp: React.FC<EditorAppProps> = ({
         showNotification('error', 'Applied code has JSON errors — switched to code view for editing');
       } else {
         showNotification('success', 'Code applied from AI assistant');
+
+        // Save immediately so changes persist without waiting for auto-save
+        if (agentId && !isNewAgent) {
+          try {
+            const config = JSON.parse(newCode) as AgentConfig;
+            const validation = ConfigStorageService.validateAgentConfig(config);
+            if (validation.valid) {
+              ConfigStorageService.saveAgentConfig(config).then(() => {
+                setOriginalCode(newCode);
+                setHasUnsavedChanges(false);
+                console.log('[EditorApp] Applied code saved immediately');
+              });
+            }
+          } catch { /* validation already passed above */ }
+        }
       }
       return true;
     } else {

@@ -116,6 +116,23 @@ export const PluginEditorView: React.FC<PluginEditorViewProps> = ({ initialPlugi
     if (confirm('Replace current code with AI suggestion?')) {
       setCode(newCode);
       showNotification('success', 'Code applied from AI assistant');
+
+      // Save immediately so changes persist without waiting for auto-save
+      if (selectedPluginId) {
+        AgentSourceStorageService.saveAgentSource(
+          selectedPluginId,
+          newCode,
+          'Applied code from AI assistant',
+          'AI Apply'
+        ).then(() => {
+          setOriginalCode(newCode);
+          setHasUnsavedChanges(false);
+          console.log('[AgentEditorView] Applied code saved immediately');
+        }).catch((error) => {
+          console.error('[AgentEditorView] Failed to save applied code:', error);
+        });
+      }
+
       return true;
     }
     return false;
