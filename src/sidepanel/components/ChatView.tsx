@@ -290,6 +290,16 @@ async function summarizeLargeResult(resultContent: string): Promise<string> {
   }
 }
 
+interface Attachment {
+  id: string;
+  type: 'image' | 'file';
+  name: string;
+  // For images: base64 data URL (data:image/png;base64,...)
+  // For files: text content
+  data: string;
+  mimeType: string;
+}
+
 interface TabMetadata {
   tabId: number;
   title: string;
@@ -341,6 +351,10 @@ export const ChatView: React.FC = () => {
     agentId?: string;
     toolName?: string;
   } | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const addTabsDropdownRef = useRef<HTMLDivElement>(null);
   const tabSelectorRef = useRef<HTMLDivElement>(null);
@@ -372,6 +386,13 @@ export const ChatView: React.FC = () => {
       ) {
         setShowTabSelector(false);
       }
+      if (
+        showAttachMenu &&
+        attachMenuRef.current &&
+        !attachMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowAttachMenu(false);
+      }
     };
 
     const handleBlur = () => {
@@ -381,6 +402,9 @@ export const ChatView: React.FC = () => {
       if (showTabSelector) {
         setShowTabSelector(false);
       }
+      if (showAttachMenu) {
+        setShowAttachMenu(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -389,7 +413,7 @@ export const ChatView: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [showAddTabsDropdown, showTabSelector]);
+  }, [showAddTabsDropdown, showTabSelector, showAttachMenu]);
 
   // Listen for tab change messages from background script
   useEffect(() => {
@@ -710,7 +734,7 @@ export const ChatView: React.FC = () => {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
+    if ((!input.trim() && attachments.length === 0) || loading) return;
 
     // Ensure we have an active session
     if (!activeSessionId) {
@@ -719,10 +743,17 @@ export const ChatView: React.FC = () => {
 
     const userMessageContent = input.trim();
 
+    // Build display content — show attachment names if present
+    let displayContent = userMessageContent;
+    if (attachments.length > 0) {
+      const attachNames = attachments.map(a => a.type === 'image' ? `[${a.name}]` : `[${a.name}]`).join(' ');
+      displayContent = displayContent ? `${attachNames} ${displayContent}` : attachNames;
+    }
+
     // Add message to active session
     const userMessage = addMessageToActiveSession({
       role: 'user',
-      content: userMessageContent,
+      content: displayContent,
     });
 
     if (!userMessage) {
@@ -730,7 +761,10 @@ export const ChatView: React.FC = () => {
       return;
     }
 
+    // Capture attachments before clearing
+    const currentAttachments = [...attachments];
     setInput('');
+    setAttachments([]);
     setLoading(true);
 
     // Log user request clearly
@@ -843,11 +877,46 @@ export const ChatView: React.FC = () => {
         }
       }
 
-      // Add current user message with full context
-      conversationHistory.push({
-        role: 'user',
-        content: contextPrompt,
-      });
+      // Add current user message with full context (and attachments if any)
+      if (currentAttachments.length > 0) {
+        const contentBlocks: any[] = [];
+
+        for (const attachment of currentAttachments) {
+          if (attachment.type === 'image') {
+            // Strip data URL prefix to get raw base64
+            const base64Data = attachment.data.replace(/^data:image\/\w+;base64,/, '');
+            contentBlocks.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: attachment.mimeType,
+                data: base64Data,
+              },
+            });
+          } else {
+            // Text file — inject as text block
+            contentBlocks.push({
+              type: 'text',
+              text: `File "${attachment.name}":\n\n${attachment.data}`,
+            });
+          }
+        }
+
+        // Add the text prompt as the final block
+        if (contextPrompt) {
+          contentBlocks.push({ type: 'text', text: contextPrompt });
+        }
+
+        conversationHistory.push({
+          role: 'user',
+          content: contentBlocks,
+        });
+      } else {
+        conversationHistory.push({
+          role: 'user',
+          content: contextPrompt,
+        });
+      }
 
       let finalResponse = '';
       let totalTokens = 0;
@@ -1125,6 +1194,83 @@ export const ChatView: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64String = reader.result as string;
+          setAttachments(prev => [...prev, {
+            id: `file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            type: 'image',
+            name: file.name,
+            data: base64String,
+            mimeType: file.type,
+          }]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        const textContent = await file.text();
+        setAttachments(prev => [...prev, {
+          id: `file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          type: 'file',
+          name: file.name,
+          data: textContent,
+          mimeType: file.type,
+        }]);
+      }
+    }
+
+    // Reset input so the same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleTakeScreenshot = async () => {
+    setShowAttachMenu(false);
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: 'browser' } as any,
+        audio: false,
+      });
+
+      // Grab a single frame
+      const track = stream.getVideoTracks()[0];
+      const imageCapture = new (window as any).ImageCapture(track);
+      const bitmap = await imageCapture.grabFrame();
+
+      // Draw to canvas -> base64
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(bitmap, 0, 0);
+      const dataUrl = canvas.toDataURL('image/png');
+
+      // Stop the stream
+      stream.getTracks().forEach(t => t.stop());
+
+      setAttachments(prev => [...prev, {
+        id: `screenshot-${Date.now()}`,
+        type: 'image',
+        name: `Screenshot ${new Date().toLocaleTimeString()}`,
+        data: dataUrl,
+        mimeType: 'image/png',
+      }]);
+    } catch (error) {
+      // User cancelled the picker — not an error
+      console.log('[ChatView] Screenshot cancelled or failed:', error);
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -1419,16 +1565,6 @@ export const ChatView: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowFileAnalysis(true)}
-              className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
-              title="Analyze file"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <span>File</span>
-            </button>
-            <button
               onClick={handleClearChat}
               className="text-xs text-gray-500 hover:text-gray-700"
               title="New chat"
@@ -1440,20 +1576,95 @@ export const ChatView: React.FC = () => {
           </div>
         </div>
 
-        {/* Input Field */}
+        {/* Input Field — single bordered container with textarea + attachments + plus button */}
         <div className="flex gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask a question about this page..."
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            rows={2}
-            disabled={loading}
-          />
+          <div className="flex-1 border border-gray-300 rounded-2xl bg-white focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-transparent">
+            {/* Attachment Thumbnails */}
+            {attachments.length > 0 && (
+              <div className="px-3 pt-2 flex gap-2 flex-wrap">
+                {attachments.map(att => (
+                  <div
+                    key={att.id}
+                    className="relative group flex items-center gap-1.5 bg-gray-100 border border-gray-200 rounded-lg px-2 py-1.5"
+                  >
+                    {att.type === 'image' ? (
+                      <img
+                        src={att.data}
+                        alt={att.name}
+                        className="w-10 h-10 object-cover rounded"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 flex items-center justify-center bg-gray-200 rounded">
+                        <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                    )}
+                    <span className="text-xs text-gray-700 max-w-[80px] truncate">{att.name}</span>
+                    <button
+                      onClick={() => removeAttachment(att.id)}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-gray-600 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
+                      title="Remove"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask a question about this page..."
+              className="w-full px-3 pt-2.5 pb-0 text-sm resize-none focus:outline-none border-none bg-transparent"
+              rows={1}
+              disabled={loading}
+            />
+
+            {/* Plus button + popup inside the input box */}
+            <div className="relative px-2 pb-1.5 pt-0.5" ref={attachMenuRef}>
+              <button
+                onClick={() => setShowAttachMenu(!showAttachMenu)}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none px-1 transition-colors"
+                title="Add attachment"
+              >
+                +
+              </button>
+
+              {showAttachMenu && (
+                <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-56 z-20">
+                  <button
+                    onClick={() => {
+                      setShowAttachMenu(false);
+                      fileInputRef.current?.click();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    Add files or photos
+                  </button>
+                  <button
+                    onClick={handleTakeScreenshot}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Take a screenshot
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
           <button
             onClick={handleSend}
-            disabled={!input.trim() || loading}
+            disabled={(!input.trim() && attachments.length === 0) || loading}
             className="px-4 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1461,6 +1672,16 @@ export const ChatView: React.FC = () => {
             </svg>
           </button>
         </div>
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.txt,.json,.csv,.xml,.md,.js,.ts,.html,.css,.py,.log"
+          multiple
+          onChange={handleFileSelect}
+          className="hidden"
+        />
       </div>
 
         {/* File Analysis Modal */}
