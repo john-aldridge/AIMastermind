@@ -52,6 +52,7 @@ export const SidePanelApp: React.FC = () => {
 
   // Function to open editor in sidepanel
   const openEditorInSidepanel = (agentId: string | null, isNew: boolean = false) => {
+    console.log('[SidePanelApp] openEditorInSidepanel called with agentId:', agentId, 'isNew:', isNew);
     setEditorAgentId(agentId);
     setEditorIsNew(isNew);
     setCurrentView('editor');
@@ -381,7 +382,7 @@ export const SidePanelApp: React.FC = () => {
 
       {/* Content - Scrollable */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {currentView === 'chat' && <ChatView />}
+        {currentView === 'chat' && <ChatView onOpenInEditor={(agentId) => openEditorInSidepanel(agentId, false)} />}
         {currentView === 'agents' && (
           <div className="overflow-auto flex-1">
             <AgentsView

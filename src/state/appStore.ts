@@ -184,11 +184,12 @@ interface AppState {
   activateConfiguration: (id: string) => void;
 
   // Chat session management
-  createNewSession: (tabUrl?: string) => ChatSession;
+  createNewSession: (tabUrl?: string, editorContext?: { agentId: string; agentName: string }) => ChatSession;
   switchSession: (id: string) => void;
   addMessageToActiveSession: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => ChatMessage | null;
   deleteSession: (id: string) => void;
   setSessionTitle: (id: string, title: string) => void;
+  updateSessionEditorContext: (id: string, editorContext: { agentId: string; agentName: string }) => void;
   getActiveSession: () => ChatSession | null;
   getSessionSummaries: () => ChatSessionSummary[];
   searchSessions: (query: string) => ChatSessionSummary[];
@@ -410,7 +411,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   }),
 
   // Session management actions
-  createNewSession: (tabUrl?: string) => {
+  createNewSession: (tabUrl?: string, editorContext?: { agentId: string; agentName: string }) => {
     const newSession: ChatSession = {
       id: crypto.randomUUID(),
       title: 'New Chat',
@@ -418,6 +419,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       updatedAt: Date.now(),
       tabUrl,
       messages: [createWelcomeMessage()],
+      editorContext,
     };
 
     set((state) => ({
@@ -497,6 +499,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
+  updateSessionEditorContext: (id: string, editorContext: { agentId: string; agentName: string }) => {
+    set((state) => ({
+      chatSessions: state.chatSessions.map((s) =>
+        s.id === id ? { ...s, editorContext, updatedAt: Date.now() } : s
+      ),
+    }));
+  },
+
   getActiveSession: () => {
     const state = get();
     return state.chatSessions.find((s) => s.id === state.activeSessionId) || null;
@@ -513,6 +523,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         updatedAt: session.updatedAt,
         messageCount: session.messages.length,
         preview: firstUserMessage?.content.substring(0, 100),
+        editorContext: session.editorContext,
       };
     });
   },
@@ -537,6 +548,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           updatedAt: session.updatedAt,
           messageCount: session.messages.length,
           preview: firstUserMessage?.content.substring(0, 100),
+          editorContext: session.editorContext,
         };
       });
   },

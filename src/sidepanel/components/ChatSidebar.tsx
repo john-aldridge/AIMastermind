@@ -6,11 +6,20 @@ import type { ChatSessionSummary } from '@/types/chat';
 interface ChatSidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** When set, sidebar is in "editor mode": filters to this agent's sessions only */
+  filterAgentId?: string;
+  /** Editor context to tag new sessions created from the sidebar */
+  editorContext?: { agentId: string; agentName: string };
+  /** Callback to open an agent in the editor (main chat mode) */
+  onOpenInEditor?: (agentId: string) => void;
 }
 
 export const ChatSidebar: React.FC<ChatSidebarProps> = ({
   collapsed,
   onToggleCollapse,
+  filterAgentId,
+  editorContext,
+  onOpenInEditor,
 }) => {
   const {
     chatSessions,
@@ -24,15 +33,21 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [tooltipSession, setTooltipSession] = useState<{ id: string; title: string; top: number } | null>(null);
+  const [agentPopover, setAgentPopover] = useState<{ sessionId: string; agentId: string; agentName: string; top: number; left: number } | null>(null);
   const titleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const agentPopoverRef = useRef<HTMLDivElement>(null);
 
-  // Get all sessions for display
+  // Get sessions for display — filter by agent in editor mode
   const sessions = useMemo((): ChatSessionSummary[] => {
-    return getSessionSummaries();
-  }, [chatSessions, getSessionSummaries]);
+    const all = getSessionSummaries();
+    if (filterAgentId) {
+      return all.filter(s => s.editorContext?.agentId === filterAgentId);
+    }
+    return all;
+  }, [chatSessions, getSessionSummaries, filterAgentId]);
 
   const handleNewChat = () => {
-    createNewSession();
+    createNewSession(undefined, editorContext);
   };
 
   const handleSearchSelect = (sessionId: string) => {
@@ -59,6 +74,31 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
   const handleMouseLeave = () => {
     setHoveredSessionId(null);
     setTooltipSession(null);
+  };
+
+  // Close agent popover on click outside
+  React.useEffect(() => {
+    if (!agentPopover) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (agentPopoverRef.current && !agentPopoverRef.current.contains(e.target as Node)) {
+        setAgentPopover(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [agentPopover]);
+
+  const handleAgentBadgeClick = (e: React.MouseEvent, session: ChatSessionSummary) => {
+    e.stopPropagation();
+    if (!session.editorContext) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setAgentPopover({
+      sessionId: session.id,
+      agentId: session.editorContext.agentId,
+      agentName: session.editorContext.agentName,
+      top: rect.bottom + 4,
+      left: rect.left,
+    });
   };
 
   // Collapsed state - just icons
@@ -109,6 +149,7 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
           isOpen={showSearchModal}
           onClose={() => setShowSearchModal(false)}
           onSelectSession={handleSearchSelect}
+          filterAgentId={filterAgentId}
         />
       </>
     );
@@ -175,7 +216,16 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
               {sessions.map((session) => (
                 <div
                   key={session.id}
-                  onClick={() => switchSession(session.id)}
+                  onClick={() => {
+                    // Agent sessions: open in the editor view
+                    if (session.editorContext && onOpenInEditor) {
+                      console.log('[ChatSidebar] Agent session clicked, opening editor:', session.editorContext);
+                      onOpenInEditor(session.editorContext.agentId);
+                    } else {
+                      console.log('[ChatSidebar] Regular session clicked:', session.id, 'editorContext:', session.editorContext, 'onOpenInEditor:', !!onOpenInEditor);
+                      switchSession(session.id);
+                    }
+                  }}
                   onMouseEnter={() => handleMouseEnter(session.id, session.title)}
                   onMouseLeave={handleMouseLeave}
                   className={`relative px-3 py-1.5 cursor-pointer transition-colors ${
@@ -185,7 +235,22 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1">
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 flex items-center gap-1">
+                      {/* Agent badge (main mode only) */}
+                      {!filterAgentId && session.editorContext && (
+                        <button
+                          onClick={(e) => handleAgentBadgeClick(e, session)}
+                          className="flex-shrink-0 w-4 h-4 rounded bg-purple-100 text-purple-600 hover:bg-purple-200 flex items-center justify-center transition-colors"
+                          title={`Agent chat: ${session.editorContext.agentName}`}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                            <rect x="3" y="4" width="18" height="12" rx="2" />
+                            <circle cx="9" cy="10" r="1.5" fill="currentColor" stroke="none" />
+                            <circle cx="15" cy="10" r="1.5" fill="currentColor" stroke="none" />
+                            <path strokeLinecap="round" d="M9 20l3-4 3 4" />
+                          </svg>
+                        </button>
+                      )}
                       <div
                         ref={(el) => {
                           if (el) titleRefs.current.set(session.id, el);
@@ -241,7 +306,64 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
         isOpen={showSearchModal}
         onClose={() => setShowSearchModal(false)}
         onSelectSession={handleSearchSelect}
+        filterAgentId={filterAgentId}
       />
+
+      {/* Agent info popover */}
+      {agentPopover && (
+        <div
+          ref={agentPopoverRef}
+          className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl w-52"
+          style={{ top: agentPopover.top, left: agentPopover.left }}
+        >
+          <div className="px-3 py-2 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded bg-purple-100 text-purple-600 flex items-center justify-center flex-shrink-0">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <rect x="3" y="4" width="18" height="12" rx="2" />
+                  <circle cx="9" cy="10" r="1.5" fill="currentColor" stroke="none" />
+                  <circle cx="15" cy="10" r="1.5" fill="currentColor" stroke="none" />
+                  <path strokeLinecap="round" d="M9 20l3-4 3 4" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-gray-900 truncate">{agentPopover.agentName}</div>
+                <div className="text-xs text-gray-500">Agent chat</div>
+              </div>
+            </div>
+          </div>
+          <div className="py-1">
+            {onOpenInEditor && (
+              <button
+                onClick={() => {
+                  onOpenInEditor(agentPopover.agentId);
+                  setAgentPopover(null);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Open in side panel
+              </button>
+            )}
+            <button
+              onClick={() => {
+                chrome.tabs.create({
+                  url: chrome.runtime.getURL(`src/editor/index.html?agentId=${encodeURIComponent(agentPopover.agentId)}`),
+                });
+                setAgentPopover(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              Open in new tab
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 };

@@ -8,7 +8,7 @@ import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MonacoEditor } from '../sidepanel/components/MonacoEditor';
 import { VersionManager } from '../sidepanel/components/VersionManager';
-import { EditorChatPanel } from '../sidepanel/components/EditorChatPanel';
+import { ChatView } from '../sidepanel/components/ChatView';
 import { ResizablePanel } from './ResizablePanel';
 import { ResourcesPane, ResourceType } from './components/ResourcesPane';
 import { MarkdownPreview } from './components/MarkdownPreview';
@@ -16,6 +16,10 @@ import { AgentFlowView } from '../sidepanel/components/AgentFlowView';
 import { apiService } from '../utils/api';
 import { ConfigStorageService } from '../storage/configStorage';
 import { ConfigRegistry } from '../services/configRegistry';
+import { useAppStore } from '../state/appStore';
+import { chromeStorageService } from '../storage/chromeStorage';
+import { registerAllClients } from '../clients';
+import { registerAllAgents } from '../agents';
 import type { AgentConfig } from '../types/agentConfig';
 
 // Configure Monaco to use Vite-bundled workers
@@ -113,6 +117,7 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
   const [selectedCapability, setSelectedCapability] = useState<string>('');
   const [selectedTabId, setSelectedTabId] = useState<number | null>(null);
+  const [contextTabId, setContextTabId] = useState<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
 
   // Validation state
@@ -121,8 +126,15 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   const [showValidationModal, setShowValidationModal] = useState(false);
   const validationTimerRef = useRef<number | null>(null);
 
+  // Flow view validation state (passed up from AgentFlowView)
+  const [flowValidationErrors, setFlowValidationErrors] = useState<Array<{ message: string; nodeId: string | null }>>([]);
+  const [flowHasChanges, setFlowHasChanges] = useState(false);
+  const [showValidationDropdown, setShowValidationDropdown] = useState(false);
+  const validationDropdownRef = useRef<HTMLDivElement>(null);
+
   // Parsed config for flow view
   const parsedConfig = useMemo((): AgentConfig | null => {
+    console.log('[EditorApp] parsedConfig memo: validationStatus:', validationStatus, 'code length:', code.length);
     if (validationStatus !== 'valid') return null;
     try {
       return JSON.parse(code);
@@ -140,6 +152,51 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   const [showTabDropdown, setShowTabDropdown] = useState(false);
   const runDropdownRef = useRef<HTMLDivElement>(null);
   const tabDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Store hydration state (for standalone mode)
+  const [storeReady, setStoreReady] = useState(mode === 'embedded');
+
+  // Hydrate store in standalone mode (follows SidePanelApp pattern)
+  useEffect(() => {
+    if (mode !== 'standalone') return;
+
+    const init = async () => {
+      registerAllClients();
+      registerAllAgents();
+
+      const STORAGE_KEY = 'ai_mastermind_user_config';
+      const result = await chrome.storage.local.get(STORAGE_KEY);
+      if (result[STORAGE_KEY]) {
+        useAppStore.setState({ userConfig: result[STORAGE_KEY] });
+      }
+
+      const sessionState = await chromeStorageService.loadChatSessions();
+      if (sessionState.sessions.length > 0) {
+        useAppStore.getState().setChatSessions(sessionState.sessions);
+        // Don't restore activeSessionId — let ChatView create agent-scoped session
+      }
+
+      setStoreReady(true);
+    };
+
+    init();
+  }, [mode]);
+
+  // Persist chat sessions in standalone mode
+  useEffect(() => {
+    if (mode !== 'standalone' || !storeReady) return;
+
+    const unsub = useAppStore.subscribe((state, prev) => {
+      if (state.chatSessions !== prev.chatSessions || state.activeSessionId !== prev.activeSessionId) {
+        chromeStorageService.saveChatSessions({
+          sessions: state.chatSessions,
+          activeSessionId: state.activeSessionId,
+        });
+      }
+    });
+
+    return () => unsub();
+  }, [mode, storeReady]);
 
   // Initialize API service with user's configuration
   useEffect(() => {
@@ -223,26 +280,63 @@ export const EditorApp: React.FC<EditorAppProps> = ({
     }
 
     if (isNew) {
-      // Generate a temporary ID for new agent
+      // Generate a unique ID for new agent and sync it into the template
       const timestamp = Date.now();
       const tempId = `new-agent-${timestamp}`;
+      const template = JSON.parse(BLANK_AGENT_CONFIG_TEMPLATE);
+      template.id = tempId;
+      const configJson = JSON.stringify(template, null, 2);
+
       setPluginId(tempId);
       setIsNewAgent(true);
       setPluginName('New Agent');
       setPluginDescription('A new custom agent');
 
-      // Load blank config template
-      setCode(BLANK_AGENT_CONFIG_TEMPLATE);
-      setOriginalCode(BLANK_AGENT_CONFIG_TEMPLATE);
+      // Load blank config template with matching ID
+      setCode(configJson);
+      setOriginalCode(configJson);
       setReadmeContent('');
       setOriginalReadme('');
+
+      // Auto-save so the config can be found when re-opening from chat sidebar
+      ConfigStorageService.saveAgentConfig(template).catch(err =>
+        console.error('[EditorApp] Failed to auto-save initial config:', err)
+      );
     } else if (id) {
+      console.log('[EditorApp] Setting pluginId from props:', id);
       setPluginId(id);
+    } else {
+      console.log('[EditorApp] No agent ID resolved. mode:', mode, 'propAgentId:', propAgentId, 'propIsNew:', propIsNew);
     }
   }, [mode, propAgentId, propIsNew]);
 
+  // Resolve context tab ID on mount
+  useEffect(() => {
+    const resolveContextTab = async () => {
+      if (mode === 'standalone') {
+        const params = new URLSearchParams(window.location.search);
+        const tabIdParam = params.get('tabId');
+        if (tabIdParam) {
+          setContextTabId(Number(tabIdParam));
+          return;
+        }
+      }
+      // Embedded mode or no URL param: use active tab
+      try {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (activeTab?.id) {
+          setContextTabId(activeTab.id);
+        }
+      } catch (error) {
+        console.error('[EditorApp] Failed to get active tab:', error);
+      }
+    };
+    resolveContextTab();
+  }, [mode]);
+
   // Load plugin when ID is set (but not for new agents)
   useEffect(() => {
+    console.log('[EditorApp] Load plugin effect: agentId:', agentId, 'isNewAgent:', isNewAgent);
     if (agentId && !isNewAgent) {
       loadPlugin(agentId);
     }
@@ -297,18 +391,22 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   // Validate code on load and after changes (debounced)
   useEffect(() => {
     const validateCode = () => {
+      console.log('[EditorApp] validateCode running, code length:', code.length);
       setValidationStatus('validating');
       try {
         const config: AgentConfig = JSON.parse(code);
         const validation = ConfigStorageService.validateAgentConfig(config);
         if (validation.valid) {
+          console.log('[EditorApp] Validation: VALID');
           setValidationStatus('valid');
           setValidationErrors([]);
         } else {
+          console.log('[EditorApp] Validation: INVALID', validation.errors);
           setValidationStatus('invalid');
           setValidationErrors(validation.errors);
         }
       } catch (parseError) {
+        console.log('[EditorApp] Validation: JSON parse error', parseError instanceof Error ? parseError.message : parseError);
         setValidationStatus('invalid');
         setValidationErrors([`Invalid JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`]);
       }
@@ -357,14 +455,19 @@ export const EditorApp: React.FC<EditorAppProps> = ({
       if (showTabDropdown && tabDropdownRef.current && !tabDropdownRef.current.contains(event.target as Node)) {
         setShowTabDropdown(false);
       }
+      if (showValidationDropdown && validationDropdownRef.current && !validationDropdownRef.current.contains(event.target as Node)) {
+        setShowValidationDropdown(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showRunDropdown, showTabDropdown]);
+  }, [showRunDropdown, showTabDropdown, showValidationDropdown]);
 
   const loadPlugin = async (id: string) => {
+    console.log('[EditorApp] loadPlugin called with id:', id);
     try {
       const agentConfig = await ConfigStorageService.loadAgentConfig(id);
+      console.log('[EditorApp] loadAgentConfig result:', agentConfig ? `found: ${agentConfig.name} (${agentConfig.id})` : 'NULL - agent not found in storage');
       if (agentConfig) {
         setPluginName(agentConfig.name);
         setPluginDescription(agentConfig.description);
@@ -484,6 +587,7 @@ export const EditorApp: React.FC<EditorAppProps> = ({
       registry.registerAgent(config);
 
       setIsNewAgent(false);
+      setPluginId(config.id); // Sync internal ID with the saved config's actual ID
       setOriginalCode(JSON.stringify(config, null, 2));
       setHasUnsavedChanges(false);
       setShowSaveModal(false);
@@ -913,28 +1017,87 @@ export const EditorApp: React.FC<EditorAppProps> = ({
               </>
             )}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-3 flex-shrink-0">
             {/* Validation Status Indicator - only for agent-code */}
             {selectedResource === 'agent-code' && (
               <>
-                {validationStatus === 'validating' && (
-                  <span className="px-2 py-1 text-xs text-gray-500 whitespace-nowrap">
-                    Validating...
-                  </span>
-                )}
-                {validationStatus === 'valid' && (
-                  <span className="px-2 py-1 text-xs text-green-600 font-medium whitespace-nowrap">
-                    Valid
-                  </span>
-                )}
-                {validationStatus === 'invalid' && (
-                  <button
-                    onClick={() => setShowValidationModal(true)}
-                    className="px-2 py-1 text-xs text-red-600 font-medium whitespace-nowrap hover:bg-red-50 rounded cursor-pointer"
-                    title="Click to see errors"
-                  >
-                    Invalid
-                  </button>
+                {/* Flow mode: use flowValidationErrors and flowHasChanges */}
+                {viewMode === 'flow' ? (
+                  <>
+                    {flowHasChanges && (
+                      <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded mr-1">
+                        Unsaved changes
+                      </span>
+                    )}
+                    {flowValidationErrors.length > 0 ? (
+                      <div className="relative mr-2" ref={validationDropdownRef}>
+                        <button
+                          onClick={() => setShowValidationDropdown(!showValidationDropdown)}
+                          className="flex items-center gap-1 text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 transition-colors cursor-pointer"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span>{flowValidationErrors.length} error{flowValidationErrors.length > 1 ? 's' : ''}</span>
+                          <svg className={`w-2.5 h-2.5 transition-transform ${showValidationDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        {showValidationDropdown && (
+                          <div className="absolute top-full left-0 mt-1 w-80 max-h-60 overflow-y-auto bg-white border border-red-200 rounded-lg shadow-lg z-50">
+                            <div className="p-2 border-b border-red-100 bg-red-50">
+                              <span className="text-sm font-medium text-red-800">Validation Errors</span>
+                            </div>
+                            <ul className="p-2 space-y-1">
+                              {flowValidationErrors.map((error, index) => (
+                                <li key={index} className="flex items-start gap-2 text-sm text-red-700 bg-red-50 p-2 rounded">
+                                  <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <span>{error.message}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 text-green-600 text-xs mr-2">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span>Valid</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* Code mode: use validationStatus and hasUnsavedChanges */
+                  <>
+                    {hasUnsavedChanges && (
+                      <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded mr-1">
+                        Unsaved changes
+                      </span>
+                    )}
+                    {validationStatus === 'validating' && (
+                      <span className="px-2 py-1 text-xs text-gray-500 whitespace-nowrap mr-2">
+                        Validating...
+                      </span>
+                    )}
+                    {validationStatus === 'valid' && (
+                      <span className="px-2 py-1 text-xs text-green-600 font-medium whitespace-nowrap mr-2">
+                        Valid
+                      </span>
+                    )}
+                    {validationStatus === 'invalid' && (
+                      <button
+                        onClick={() => setShowValidationModal(true)}
+                        className="px-2 py-1 text-xs text-red-600 font-medium whitespace-nowrap hover:bg-red-50 rounded cursor-pointer mr-2"
+                        title="Click to see errors"
+                      >
+                        Invalid
+                      </button>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -997,12 +1160,15 @@ export const EditorApp: React.FC<EditorAppProps> = ({
         </div>
         <div className="flex-1 overflow-hidden">
           {/* Agent Code Views */}
+          {(() => { console.log('[EditorApp] Render: selectedResource:', selectedResource, 'viewMode:', viewMode, 'parsedConfig:', !!parsedConfig, 'code length:', code.length, 'validationStatus:', validationStatus); return null; })()}
           {selectedResource === 'agent-code' && (
             viewMode === 'flow' && parsedConfig ? (
               <AgentFlowView
                 config={parsedConfig}
                 onConfigChange={handleFlowConfigChange}
                 onSave={handleSave}
+                onValidationChange={setFlowValidationErrors}
+                onHasChangesChange={setFlowHasChanges}
               />
             ) : (
               <MonacoEditor
@@ -1035,7 +1201,15 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   // Render the AI assistant panel
   const renderAIAssistant = () => (
     <div className="flex flex-col bg-white h-full">
-      <EditorChatPanel pluginCode={code} pluginName={pluginName} onApplyCode={handleApplyCodeFromChat} />
+      {storeReady && agentId ? (
+        <ChatView
+          editorContext={{ agentId, agentName: pluginName, pluginCode: code }}
+          onApplyCode={handleApplyCodeFromChat}
+          initialTabId={contextTabId}
+        />
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-sm text-gray-500">Initializing...</div>
+      )}
     </div>
   );
 
