@@ -8,6 +8,7 @@ import type { FlowNodeData } from '../AgentFlowParser';
 import { CATEGORY_COLORS, NODE_DIMENSIONS } from '../flowStyles';
 import { InfoTooltip } from './InfoTooltip';
 import { getNodeDescription } from '../nodeDescriptions';
+import { getBlockDefinition } from '../blockDefinitions';
 
 interface ActionNodeProps {
   data: FlowNodeData;
@@ -77,6 +78,9 @@ export const ActionNode = memo(({ data, selected }: ActionNodeProps) => {
   const hasErrors = data.errors && data.errors.length > 0;
   const showNotes = data.showNotes !== false; // Default to true
 
+  // Friendly display name from block definitions
+  const displayName = getBlockDefinition(data.actionType)?.label || data.actionType;
+
   // Get summary info based on action type
   const getSummary = () => {
     const config = data.config;
@@ -96,11 +100,11 @@ export const ActionNode = memo(({ data, selected }: ActionNodeProps) => {
       case 'notify':
         return config.title;
       case 'callClient':
-        return `${config.client}.${config.method}`;
+        return config.client && config.method ? `${config.client}.${config.method}` : config.client || config.method || null;
       case 'set':
-        return `${config.variable} = ${JSON.stringify(config.value)?.substring(0, 15)}`;
+        return config.variable ? `${config.variable} = ${JSON.stringify(config.value)?.substring(0, 15) ?? ''}` : null;
       case 'executeScript':
-        return config.script?.substring(0, 30) + '...';
+        return config.script ? config.script.substring(0, 30) + '...' : null;
       default:
         return null;
     }
@@ -169,7 +173,7 @@ export const ActionNode = memo(({ data, selected }: ActionNodeProps) => {
             className="font-semibold text-sm flex-1"
             style={{ color: colors.text }}
           >
-            {data.actionType}
+            {displayName}
           </span>
           <InfoTooltip text={getNodeDescription(data.actionType)} position="top" />
         </div>

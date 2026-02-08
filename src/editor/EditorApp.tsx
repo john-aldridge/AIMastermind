@@ -134,7 +134,6 @@ export const EditorApp: React.FC<EditorAppProps> = ({
 
   // Parsed config for flow view
   const parsedConfig = useMemo((): AgentConfig | null => {
-    console.log('[EditorApp] parsedConfig memo: validationStatus:', validationStatus, 'code length:', code.length);
     if (validationStatus !== 'valid') return null;
     try {
       return JSON.parse(code);
@@ -303,10 +302,7 @@ export const EditorApp: React.FC<EditorAppProps> = ({
         console.error('[EditorApp] Failed to auto-save initial config:', err)
       );
     } else if (id) {
-      console.log('[EditorApp] Setting pluginId from props:', id);
       setPluginId(id);
-    } else {
-      console.log('[EditorApp] No agent ID resolved. mode:', mode, 'propAgentId:', propAgentId, 'propIsNew:', propIsNew);
     }
   }, [mode, propAgentId, propIsNew]);
 
@@ -336,7 +332,6 @@ export const EditorApp: React.FC<EditorAppProps> = ({
 
   // Load plugin when ID is set (but not for new agents)
   useEffect(() => {
-    console.log('[EditorApp] Load plugin effect: agentId:', agentId, 'isNewAgent:', isNewAgent);
     if (agentId && !isNewAgent) {
       loadPlugin(agentId);
     }
@@ -391,22 +386,18 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   // Validate code on load and after changes (debounced)
   useEffect(() => {
     const validateCode = () => {
-      console.log('[EditorApp] validateCode running, code length:', code.length);
       setValidationStatus('validating');
       try {
         const config: AgentConfig = JSON.parse(code);
         const validation = ConfigStorageService.validateAgentConfig(config);
         if (validation.valid) {
-          console.log('[EditorApp] Validation: VALID');
           setValidationStatus('valid');
           setValidationErrors([]);
         } else {
-          console.log('[EditorApp] Validation: INVALID', validation.errors);
           setValidationStatus('invalid');
           setValidationErrors(validation.errors);
         }
       } catch (parseError) {
-        console.log('[EditorApp] Validation: JSON parse error', parseError instanceof Error ? parseError.message : parseError);
         setValidationStatus('invalid');
         setValidationErrors([`Invalid JSON: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`]);
       }
@@ -464,10 +455,8 @@ export const EditorApp: React.FC<EditorAppProps> = ({
   }, [showRunDropdown, showTabDropdown, showValidationDropdown]);
 
   const loadPlugin = async (id: string) => {
-    console.log('[EditorApp] loadPlugin called with id:', id);
     try {
       const agentConfig = await ConfigStorageService.loadAgentConfig(id);
-      console.log('[EditorApp] loadAgentConfig result:', agentConfig ? `found: ${agentConfig.name} (${agentConfig.id})` : 'NULL - agent not found in storage');
       if (agentConfig) {
         setPluginName(agentConfig.name);
         setPluginDescription(agentConfig.description);
@@ -501,10 +490,35 @@ export const EditorApp: React.FC<EditorAppProps> = ({
     setCode(newCode);
   };
 
-  const handleApplyCodeFromChat = (newCode: string) => {
-    if (confirm('Replace current code with AI suggestion?')) {
+  const handleApplyCodeFromChat = (newCode: string): boolean => {
+    console.log('[EditorApp] Apply code from chat requested, new code length:', newCode.length);
+    let isValidJson = false;
+    try {
+      const parsed = JSON.parse(newCode);
+      isValidJson = true;
+      console.log('[EditorApp] Suggested code is valid JSON, agent id:', parsed.id, 'name:', parsed.name);
+    } catch {
+      console.log('[EditorApp] Suggested code is not valid JSON');
+    }
+
+    const confirmMsg = isValidJson
+      ? 'Replace current code with AI suggestion?'
+      : 'Warning: The suggested code is not valid JSON (it may have been truncated). Apply anyway? You will need to fix syntax errors in the code view.';
+
+    if (confirm(confirmMsg)) {
+      console.log('[EditorApp] User confirmed apply code, replacing current code (length:', code.length, ') with new code (length:', newCode.length, ')');
       setCode(newCode);
-      showNotification('success', 'Code applied from AI assistant');
+      if (!isValidJson) {
+        // Switch to code view so user can see and fix the invalid JSON
+        setViewMode('code');
+        showNotification('error', 'Applied code has JSON errors — switched to code view for editing');
+      } else {
+        showNotification('success', 'Code applied from AI assistant');
+      }
+      return true;
+    } else {
+      console.log('[EditorApp] User cancelled apply code');
+      return false;
     }
   };
 
@@ -1160,7 +1174,6 @@ export const EditorApp: React.FC<EditorAppProps> = ({
         </div>
         <div className="flex-1 overflow-hidden">
           {/* Agent Code Views */}
-          {(() => { console.log('[EditorApp] Render: selectedResource:', selectedResource, 'viewMode:', viewMode, 'parsedConfig:', !!parsedConfig, 'code length:', code.length, 'validationStatus:', validationStatus); return null; })()}
           {selectedResource === 'agent-code' && (
             viewMode === 'flow' && parsedConfig ? (
               <AgentFlowView
@@ -1170,6 +1183,26 @@ export const EditorApp: React.FC<EditorAppProps> = ({
                 onValidationChange={setFlowValidationErrors}
                 onHasChangesChange={setFlowHasChanges}
               />
+            ) : viewMode === 'flow' && !parsedConfig ? (
+              /* Flow view selected but JSON is invalid — show error + code editor */
+              <div className="flex flex-col h-full">
+                <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+                  <svg className="w-4 h-4 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  <span className="text-xs text-yellow-800">
+                    Flow view unavailable — fix JSON errors below, then switch back to Flow.
+                  </span>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <MonacoEditor
+                    value={code}
+                    onChange={handleCodeChange}
+                    language="json"
+                    theme="vs-dark"
+                  />
+                </div>
+              </div>
             ) : (
               <MonacoEditor
                 value={code}

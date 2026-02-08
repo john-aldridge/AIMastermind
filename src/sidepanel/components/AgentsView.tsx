@@ -167,8 +167,13 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
     setActiveEditDropdown(null);
   };
 
-  const openEditorInNewTab = (agentId: string) => {
-    const editorUrl = chrome.runtime.getURL(`src/editor/index.html?agentId=${encodeURIComponent(agentId)}`);
+  const openEditorInNewTab = async (agentId: string) => {
+    let tabParam = '';
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.id) tabParam = `&tabId=${activeTab.id}`;
+    } catch {}
+    const editorUrl = chrome.runtime.getURL(`src/editor/index.html?agentId=${encodeURIComponent(agentId)}${tabParam}`);
     chrome.tabs.create({ url: editorUrl });
     setActiveEditDropdown(null);
   };
@@ -180,8 +185,13 @@ export const AgentsView: React.FC<AgentsViewProps> = ({ onOpenEditor, activeTab,
     setShowNewAgentDropdown(false);
   };
 
-  const handleCreateNewAgentInNewTab = () => {
-    const editorUrl = chrome.runtime.getURL(`src/editor/index.html?isNew=true`);
+  const handleCreateNewAgentInNewTab = async () => {
+    let tabParam = '';
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.id) tabParam = `&tabId=${activeTab.id}`;
+    } catch {}
+    const editorUrl = chrome.runtime.getURL(`src/editor/index.html?isNew=true${tabParam}`);
     chrome.tabs.create({ url: editorUrl });
     setShowNewAgentDropdown(false);
   };

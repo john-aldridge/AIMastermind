@@ -219,10 +219,8 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                   onClick={() => {
                     // Agent sessions: open in the editor view
                     if (session.editorContext && onOpenInEditor) {
-                      console.log('[ChatSidebar] Agent session clicked, opening editor:', session.editorContext);
                       onOpenInEditor(session.editorContext.agentId);
                     } else {
-                      console.log('[ChatSidebar] Regular session clicked:', session.id, 'editorContext:', session.editorContext, 'onOpenInEditor:', !!onOpenInEditor);
                       switchSession(session.id);
                     }
                   }}

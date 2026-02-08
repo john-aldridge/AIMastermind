@@ -287,7 +287,7 @@ export const LLM_BLOCKS: BlockDefinition[] = [
   },
   {
     type: 'analyzeWithLLM',
-    label: 'Analyze with LLM',
+    label: 'AI Analysis',
     icon: '🤖',
     category: 'llm',
     description: 'Send data to LLM for analysis',
@@ -300,7 +300,7 @@ export const LLM_BLOCKS: BlockDefinition[] = [
   },
   {
     type: 'callLLMForOperations',
-    label: 'LLM Operations',
+    label: 'AI Operations',
     icon: '🧠',
     category: 'llm',
     description: 'Ask LLM to generate safe operations',
@@ -313,7 +313,7 @@ export const LLM_BLOCKS: BlockDefinition[] = [
   },
   {
     type: 'executeSafeOperations',
-    label: 'Execute Operations',
+    label: 'Run Operations',
     icon: '⚡',
     category: 'llm',
     description: 'Execute validated safe operations',
@@ -327,7 +327,7 @@ export const LLM_BLOCKS: BlockDefinition[] = [
   },
   {
     type: 'executeScript',
-    label: 'Execute Script',
+    label: 'JavaScript',
     icon: '💻',
     category: 'llm',
     description: 'Execute JavaScript in page context',

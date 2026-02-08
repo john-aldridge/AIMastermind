@@ -10,6 +10,9 @@ import { ActiveToolsBar } from './ActiveToolsBar';
 import { ToolPickerModal } from './ToolPickerModal';
 import { ChatSidebar } from './ChatSidebar';
 import { TabContextBar, TabInfo } from './TabContextBar';
+import { ConfigStorageService } from '@/storage/configStorage';
+import { ConfigRegistry } from '@/services/configRegistry';
+import { AgentConfig } from '@/types/agentConfig';
 
 /** Extract a human-readable description from a JQL query */
 function describeJql(jql?: string): string {
@@ -301,6 +304,27 @@ interface Attachment {
   mimeType: string;
 }
 
+/** Pick max output tokens ceiling based on the active model/provider */
+function getMaxOutputTokens(provider: string, model: string): number {
+  if (provider === 'claude') {
+    if (model.includes('opus-4-6'))   return 128000;
+    if (model.includes('opus-4-5'))   return 64000;
+    if (model.includes('sonnet-4-5')) return 64000;
+    if (model.includes('haiku-4-5'))  return 64000;
+    return 8192; // Claude 3.x
+  }
+  // OpenAI — GPT-5.x family
+  if (model.includes('gpt-5'))  return 128000;
+  // o-series reasoning models
+  if (model.includes('o3') || model.includes('o4') || model.includes('codex-mini')) return 100000;
+  // GPT-4.1 family
+  if (model.includes('gpt-4.1')) return 32768;
+  // GPT-4o family
+  if (model.includes('gpt-4o'))  return 16384;
+  // Conservative fallback for unknown/older models
+  return 4096;
+}
+
 interface TabContext extends TabInfo {
   content?: string;  // Now optional, loaded on-demand
 }
@@ -316,7 +340,7 @@ interface DownloadInfo {
 
 export interface ChatViewProps {
   editorContext?: { agentId: string; agentName: string; pluginCode: string };
-  onApplyCode?: (code: string) => void;
+  onApplyCode?: (code: string) => boolean;
   initialTabId?: number | null;
   /** Callback for "Open in Editor" from sidebar (main chat mode only) */
   onOpenInEditor?: (agentId: string) => void;
@@ -345,28 +369,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const sidebarCollapsed = editorContext ? editorSidebarCollapsed : globalSidebarCollapsed;
   const setSidebarCollapsed = editorContext ? setEditorSidebarCollapsed : setGlobalSidebarCollapsed;
 
+  // Track previous agentId to distinguish save-rename from agent-switch
+  const prevAgentIdRef = useRef<string | null>(null);
+
   // When in editor mode, ensure we have an agent-scoped session active
   useEffect(() => {
     if (!editorContext) return;
 
-    console.log('[ChatView] Agent session useEffect fired. editorContext.agentId:', editorContext.agentId);
-
     const state = useAppStore.getState();
     const activeSession = state.chatSessions.find(s => s.id === state.activeSessionId);
 
-    console.log('[ChatView] Active session:', activeSession?.id, 'editorContext on active:', activeSession?.editorContext);
-
     // Already on a session for this agent — nothing to do
     if (activeSession?.editorContext?.agentId === editorContext.agentId) {
-      console.log('[ChatView] Already on correct agent session, no action needed');
+      prevAgentIdRef.current = editorContext.agentId;
       return;
     }
 
-    // If the active session is an agent session with a different ID (e.g. temp ID after save),
-    // update it in place rather than creating a duplicate
-    if (activeSession?.editorContext && activeSession.editorContext.agentId !== editorContext.agentId) {
-      console.log('[ChatView] Updating active session editorContext from', activeSession.editorContext.agentId, 'to', editorContext.agentId);
+    // If the agentId just changed (e.g. temp ID after save) and the active session
+    // matches the PREVIOUS agentId, update in place to avoid duplicating the session
+    if (prevAgentIdRef.current && activeSession?.editorContext?.agentId === prevAgentIdRef.current) {
       state.updateSessionEditorContext(activeSession.id, { agentId: editorContext.agentId, agentName: editorContext.agentName });
+      prevAgentIdRef.current = editorContext.agentId;
       return;
     }
 
@@ -376,12 +399,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
     );
 
     if (existingAgentSession) {
-      console.log('[ChatView] Found existing session for agent, switching to:', existingAgentSession.id);
       state.switchSession(existingAgentSession.id);
     } else {
-      console.log('[ChatView] No existing session for agent, creating new one');
       createNewSession(undefined, { agentId: editorContext.agentId, agentName: editorContext.agentName });
     }
+    prevAgentIdRef.current = editorContext.agentId;
   }, [editorContext?.agentId]);
 
   // Get current session messages
@@ -605,12 +627,56 @@ export const ChatView: React.FC<ChatViewProps> = ({
         }
       }
 
+      // Add editor agent tools if in editor mode
+      if (editorContext?.pluginCode) {
+        try {
+          const config: AgentConfig = JSON.parse(editorContext.pluginCode);
+
+          // Register in ConfigRegistry so it's available for execution
+          ConfigRegistry.getInstance().registerAgent(config);
+
+          // Convert capabilities to ToolDefinitions, skipping duplicates
+          const existingNames = new Set(tools.map(t => t.name));
+          for (const capability of config.capabilities || []) {
+            if (existingNames.has(capability.name)) continue;
+
+            const properties: Record<string, any> = {};
+            const required: string[] = [];
+
+            for (const param of capability.parameters) {
+              properties[param.name] = {
+                type: param.type,
+                description: param.description,
+                ...(param.default !== undefined && { default: param.default }),
+              };
+              if (param.required) {
+                required.push(param.name);
+              }
+            }
+
+            tools.push({
+              name: capability.name,
+              description: capability.description,
+              input_schema: {
+                type: 'object',
+                properties,
+                required,
+              },
+            });
+          }
+
+          console.log(`[ChatView] Editor agent "${config.name}" added ${config.capabilities?.length || 0} capabilities`);
+        } catch (err) {
+          console.warn('[ChatView] Could not parse editor agent config:', err);
+        }
+      }
+
       console.log(`[ChatView] Loaded ${tools.length} tools from ${activeClientIds.length} active clients:`, tools.map(t => t.name));
       setAvailableTools(tools);
     } catch (error) {
       console.error('[ChatView] Error loading tools:', error);
     }
-  }, []);
+  }, [editorContext?.pluginCode]);
 
   // Load tools on mount (delayed to ensure clients are registered first)
   useEffect(() => {
@@ -629,6 +695,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
     return () => unsubscribe();
   }, [loadAvailableTools]);
+
+  // Reload tools when editor code changes
+  useEffect(() => {
+    if (editorContext?.pluginCode) {
+      loadAvailableTools();
+    }
+  }, [editorContext?.pluginCode, loadAvailableTools]);
 
   // Callback for ActiveToolsBar to trigger tool reload
   const handleToolsChange = useCallback(() => {
@@ -711,6 +784,74 @@ export const ChatView: React.FC<ChatViewProps> = ({
         const result = await pluginInstance.executeCapability(toolName, toolInput);
         console.log(`[ChatView] Tool ${toolName} result:`, result);
         return result;
+      }
+    }
+
+    // Fallback: check editor agent config
+    if (editorContext?.pluginCode) {
+      try {
+        const config: AgentConfig = JSON.parse(editorContext.pluginCode);
+        const capability = config.capabilities?.find(c => c.name === toolName);
+
+        if (capability) {
+          console.log(`[ChatView] Editor agent execution: ${toolName} from "${config.name}"`);
+
+          // Resolve dependencies from ClientRegistry + Chrome storage
+          for (const dep of config.dependencies || []) {
+            const clientInstance = ClientRegistry.getInstance(dep);
+            if (clientInstance) {
+              const clientStorageKey = `client:${dep}`;
+              const clientData = await chrome.storage.local.get(clientStorageKey);
+              const clientConfig = clientData[clientStorageKey];
+
+              if (clientConfig?.credentials) {
+                clientInstance.setCredentials(clientConfig.credentials);
+                await clientInstance.initialize();
+              }
+            }
+          }
+
+          // Register config in ConfigRegistry for execution
+          ConfigRegistry.getInstance().registerAgent(config);
+
+          // Build userConfig with tabId from selected tab and config field values
+          const execUserConfig: Record<string, any> = {};
+
+          // Load saved config field values from storage
+          const agentStorageKey = `plugin:${config.id}`;
+          const agentData = await chrome.storage.local.get(agentStorageKey);
+          const agentConfig = agentData[agentStorageKey];
+          if (agentConfig?.config) {
+            Object.assign(execUserConfig, agentConfig.config);
+          }
+
+          // Pass tabId from the first selected tab for page interaction
+          const selectedTab = tabs.find(t => t.selected);
+          if (selectedTab) {
+            execUserConfig.tabId = selectedTab.tabId;
+          }
+
+          const result = await ConfigRegistry.getInstance().executeAgentCapability(
+            config.id,
+            toolName,
+            toolInput,
+            execUserConfig
+          );
+
+          console.log(`[ChatView] Editor agent tool ${toolName} result:`, result);
+
+          if (!result.success) {
+            throw new Error(result.error || 'Agent capability execution failed');
+          }
+
+          return result.data;
+        }
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          console.warn('[ChatView] Could not parse editor agent config for execution:', err);
+        } else {
+          throw err;
+        }
       }
     }
 
@@ -967,6 +1108,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
           prompt += `\nThe user is currently editing an agent called "${editorContext.agentName}".`;
           prompt += `\n\nCurrent agent code:\n\`\`\`json\n${editorContext.pluginCode}\n\`\`\``;
           prompt += `\n\nWhen suggesting code changes, provide the full updated JSON config. The user can apply code blocks directly to their editor.`;
+
+          // If agent tools are loaded, tell the AI it can test them
+          try {
+            const editorConfig = JSON.parse(editorContext.pluginCode);
+            const editorToolNames = (editorConfig.capabilities || []).map((c: any) => c.name);
+            const loadedEditorTools = availableTools.filter(t => editorToolNames.includes(t.name));
+            if (loadedEditorTools.length > 0) {
+              prompt += `\n\n=== LIVE TESTING ===`;
+              prompt += `\nThis agent's tools are loaded and executable. You can call them directly to test the agent's capabilities:`;
+              for (const tool of loadedEditorTools) {
+                prompt += `\n- ${tool.name}: ${tool.description}`;
+              }
+              prompt += `\nWhen the user asks to test the agent or try a capability, use these tools directly.`;
+            }
+          } catch { /* ignore parse errors */ }
         }
 
         return prompt;
@@ -997,12 +1153,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
         console.log('%c💾 To copy payload, run in console: copy(window.lastApiPayload)', 'color: #4CAF50');
 
         // Call API service with tools
+        const { model: activeModel, provider } = apiService.getConfig();
+        const maxTokens = getMaxOutputTokens(provider, activeModel || '');
+
         const response = await apiService.generateContent(
           {
             prompt: '', // Not used when conversationHistory is provided
             conversationHistory,
             tools: availableTools.length > 0 ? availableTools : undefined,
             systemPrompt: buildSystemPrompt(),
+            maxTokens,
           },
           userConfig.useOwnKey
         );
@@ -1152,6 +1312,92 @@ export const ChatView: React.FC<ChatViewProps> = ({
       // Check if we hit max iterations
       if (iteration >= maxIterations) {
         finalResponse += '\n\n⚠️ Note: Reached maximum iteration limit. The task may be incomplete. If needed, you can ask me to continue or try the request again.';
+      }
+
+      // Validate any agent config code blocks before showing to the user (editor mode only)
+      if (editorContext && finalResponse) {
+        const codeBlockMatch = finalResponse.match(/```(?:json|typescript|ts)\n([\s\S]*?)```/);
+        if (codeBlockMatch) {
+          const extractedCode = codeBlockMatch[1].trim();
+          const MAX_FIX_ATTEMPTS = 2;
+
+          let validatedCode = extractedCode;
+          let validationPassed = false;
+          let lastErrors: string[] = [];
+
+          for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !validationPassed; attempt++) {
+            // Step 1: JSON parse
+            let parsed: any;
+            try {
+              parsed = JSON.parse(validatedCode);
+            } catch (parseErr) {
+              console.log(`[ChatView] Code block JSON parse failed (attempt ${attempt + 1}):`, parseErr);
+              lastErrors = [`JSON syntax error: ${parseErr}`];
+
+              // Ask AI to fix
+              conversationHistory.push({ role: 'assistant', content: finalResponse });
+              conversationHistory.push({
+                role: 'user',
+                content: `The agent config JSON you provided has a syntax error:\n${parseErr}\n\nPlease fix the error and return the complete corrected JSON inside a single \`\`\`json code block.`,
+              });
+
+              const { model: fixModel, provider: fixProvider } = apiService.getConfig();
+              const fixMaxTokens = getMaxOutputTokens(fixProvider, fixModel || '');
+              const fixResponse = await apiService.generateContent(
+                { prompt: '', conversationHistory, systemPrompt: buildSystemPrompt(), maxTokens: fixMaxTokens },
+                userConfig.useOwnKey
+              );
+              totalTokens += fixResponse.tokensUsed;
+              finalResponse = fixResponse.content;
+
+              const fixMatch = finalResponse.match(/```(?:json|typescript|ts)\n([\s\S]*?)```/);
+              if (fixMatch) {
+                validatedCode = fixMatch[1].trim();
+              } else {
+                break; // AI didn't return a code block, stop trying
+              }
+              continue;
+            }
+
+            // Step 2: Schema validation
+            const validation = ConfigStorageService.validateAgentConfig(parsed);
+            if (!validation.valid) {
+              console.log(`[ChatView] Config validation failed (attempt ${attempt + 1}):`, validation.errors);
+              lastErrors = validation.errors;
+
+              // Ask AI to fix
+              conversationHistory.push({ role: 'assistant', content: finalResponse });
+              conversationHistory.push({
+                role: 'user',
+                content: `The agent config you provided has validation errors:\n${validation.errors.map(e => `- ${e}`).join('\n')}\n\nPlease fix these issues and return the complete corrected JSON inside a single \`\`\`json code block.`,
+              });
+
+              const { model: fixModel, provider: fixProvider } = apiService.getConfig();
+              const fixMaxTokens = getMaxOutputTokens(fixProvider, fixModel || '');
+              const fixResponse = await apiService.generateContent(
+                { prompt: '', conversationHistory, systemPrompt: buildSystemPrompt(), maxTokens: fixMaxTokens },
+                userConfig.useOwnKey
+              );
+              totalTokens += fixResponse.tokensUsed;
+              finalResponse = fixResponse.content;
+
+              const fixMatch = finalResponse.match(/```(?:json|typescript|ts)\n([\s\S]*?)```/);
+              if (fixMatch) {
+                validatedCode = fixMatch[1].trim();
+              } else {
+                break;
+              }
+              continue;
+            }
+
+            validationPassed = true;
+          }
+
+          if (!validationPassed) {
+            console.log('[ChatView] Could not auto-fix config after', MAX_FIX_ATTEMPTS, 'attempts');
+            finalResponse += `\n\n⚠️ **The suggested config has issues that I couldn't automatically resolve:**\n${lastErrors.map(e => `- ${e}`).join('\n')}\n\nPlease provide more details or corrections so I can generate a valid config.`;
+          }
+        }
       }
 
       // Add assistant response to the session
@@ -1318,6 +1564,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
       <ActiveToolsBar
         onAddTools={() => setShowToolPicker(true)}
         onToolsChange={handleToolsChange}
+        editorAgent={editorContext ? (() => {
+          try {
+            const config = JSON.parse(editorContext.pluginCode);
+            return {
+              id: config.id,
+              name: config.name || editorContext.agentName,
+              capabilityCount: config.capabilities?.length || 0,
+              capabilities: (config.capabilities || []).map((c: any) => ({
+                name: c.name,
+                description: c.description,
+              })),
+            };
+          } catch { return null; }
+        })() : undefined}
       />
 
       {/* Messages Area */}
@@ -1376,8 +1636,69 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   return codeMatch ? (
                     <div className="mt-2">
                       <button
-                        onClick={() => onApplyCode(codeMatch[1].trim())}
-                        className="text-xs px-3 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 transition-colors"
+                        onClick={async () => {
+                          const rawCode = codeMatch[1].trim();
+                          console.log('[ChatView] Apply Code button clicked, extracted code length:', rawCode.length, 'from message:', message.id);
+
+                          // Lightweight re-validation (code was already validated at response time)
+                          try {
+                            const parsed = JSON.parse(rawCode);
+                            const validation = ConfigStorageService.validateAgentConfig(parsed);
+                            if (!validation.valid) {
+                              addMessageToActiveSession({
+                                role: 'assistant',
+                                content: `Cannot apply — config has validation errors:\n${validation.errors.map(e => `- ${e}`).join('\n')}\n\nPlease ask me to fix these issues.`,
+                              });
+                              return;
+                            }
+                          } catch (parseErr) {
+                            addMessageToActiveSession({
+                              role: 'assistant',
+                              content: `Cannot apply — JSON syntax error:\n\`${parseErr}\`\n\nPlease ask me to regenerate the code.`,
+                            });
+                            return;
+                          }
+
+                          const applied = onApplyCode(rawCode);
+                          if (!applied) return;
+
+                          // Generate follow-up with test suggestions
+                          addMessageToActiveSession({ role: 'user', content: '[Code applied successfully]' });
+                          setLoading(true);
+                          try {
+                            const session = getActiveSession();
+                            const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+                            if (session) {
+                              for (const msg of session.messages.filter(m => m.id !== 'welcome').slice(-20)) {
+                                history.push({ role: msg.role, content: msg.content });
+                              }
+                            }
+
+                            const { model: activeModel, provider } = apiService.getConfig();
+                            const maxTokens = getMaxOutputTokens(provider, activeModel || '');
+
+                            const followUp = await apiService.generateContent(
+                              {
+                                prompt: '',
+                                conversationHistory: history,
+                                systemPrompt: 'You are a helpful AI assistant specialized in helping developers write and improve Chrome extension agents. The user just applied code changes you suggested to their agent. Confirm the code was applied successfully, briefly remind them what changed, and suggest 2-3 specific example questions or prompts they can try to test the new agent capabilities. Keep it concise.',
+                                maxTokens,
+                              },
+                              userConfig.useOwnKey
+                            );
+
+                            addMessageToActiveSession({ role: 'assistant', content: followUp.content });
+                          } catch {
+                            addMessageToActiveSession({
+                              role: 'assistant',
+                              content: 'Code applied successfully! You can now test your updated agent.',
+                            });
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                        disabled={loading}
+                        className="text-xs px-3 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 transition-colors disabled:opacity-50"
                       >
                         Apply Code
                       </button>

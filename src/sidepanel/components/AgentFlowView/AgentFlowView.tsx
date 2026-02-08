@@ -40,6 +40,21 @@ const nodeTypes: NodeTypes = {
   loop: LoopNode as any,
 };
 
+/**
+ * Measure actual rendered heights of flow nodes from the DOM.
+ * Falls back to NODE_DIMENSIONS.height for nodes not yet in the DOM.
+ */
+function measureNodeHeights(nodeIds: string[]): Map<string, number> {
+  const heights = new Map<string, number>();
+  for (const id of nodeIds) {
+    const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`);
+    if (el) {
+      heights.set(id, el.offsetHeight);
+    }
+  }
+  return heights;
+}
+
 interface AgentFlowViewProps {
   config: AgentConfig;
   onConfigChange: (config: AgentConfig) => void;
@@ -67,7 +82,7 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
   const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(false);
-  const [isDetailsCollapsed, setIsDetailsCollapsed] = useState(false);
+  const [isDetailsCollapsed, setIsDetailsCollapsed] = useState(true);
   const [hasChanges, setHasChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
@@ -166,7 +181,7 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
 
       return () => clearTimeout(timeoutId);
     }
-  }, [config.id, getStateHash]); // Re-parse when agent changes
+  }, [JSON.stringify(config), getStateHash]); // Re-parse when agent changes or config is applied externally
 
   // Track changes and update history
   useEffect(() => {
@@ -330,11 +345,12 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
         errors: nodeErrorsMap.get(node.id) || [],
         showNotes,
         aiNote: nodeNotes.get(node.id) || node.data.aiNote,
-        isRegenerating: regeneratingNodes.has(node.id),
+        isRegenerating: regeneratingNodes.has(node.id) ||
+          (isGeneratingNotes && !nodeNotes.has(node.id) && !node.data.aiNote),
         onRegenerateNote: () => handleRegenerateNote(node.id),
       },
     }));
-  }, [nodes, nodeErrorsMap, showNotes, nodeNotes, regeneratingNodes, handleRegenerateNote]);
+  }, [nodes, nodeErrorsMap, showNotes, nodeNotes, regeneratingNodes, isGeneratingNotes, handleRegenerateNote]);
 
   // Handle edge connection
   const onConnect: OnConnect = useCallback(
@@ -591,21 +607,48 @@ const AgentFlowViewInner: React.FC<AgentFlowViewProps> = ({
     // Filter out data flow edges (animated) for layout calculation
     const executionEdges = edges.filter(e => !e.animated);
 
-    // Apply dagre layout
-    const layoutedNodes = applyLayout(nodes as FlowNode[], executionEdges);
+    // Measure actual rendered node heights from the DOM
+    const nodeHeights = measureNodeHeights(nodes.map(n => n.id));
+
+    // Apply dagre layout with measured heights
+    const layoutedNodes = applyLayout(nodes as FlowNode[], executionEdges, nodeHeights);
 
     // Update nodes with new positions
     setNodes(layoutedNodes as Node[]);
-
-    // Fit view after a short delay to let positions update
-    setTimeout(() => {
-      const reactFlowInstance = document.querySelector('.react-flow');
-      if (reactFlowInstance) {
-        // Trigger a fitView via the stored function isn't available here,
-        // but the layout change should be enough
-      }
-    }, 50);
   }, [nodes, edges, setNodes]);
+
+  // Re-layout after notes change so expanded nodes don't overlap.
+  // We serialize the note content hashes to detect actual content changes
+  // (not just Map identity), including single-node regenerations.
+  const notesContentKey = useMemo(() => {
+    const parts: string[] = [];
+    nodeNotes.forEach((note, id) => {
+      parts.push(`${id}:${note.configHash || ''}`);
+    });
+    return parts.sort().join('|');
+  }, [nodeNotes]);
+
+  const prevNotesKey = useRef('');
+  useEffect(() => {
+    // Skip initial empty state and no-change cases
+    if (!notesContentKey || notesContentKey === prevNotesKey.current || nodes.length === 0) {
+      prevNotesKey.current = notesContentKey;
+      return;
+    }
+    prevNotesKey.current = notesContentKey;
+
+    // Let the DOM render the note content first, then measure actual heights
+    const timerId = setTimeout(() => {
+      const executionEdges = edges.filter(e => !e.animated);
+      const nodeHeights = measureNodeHeights(nodes.map(n => n.id));
+
+      if (nodeHeights.size > 0) {
+        const layoutedNodes = applyLayout(nodes as FlowNode[], executionEdges, nodeHeights);
+        setNodes(layoutedNodes as Node[]);
+      }
+    }, 150);
+    return () => clearTimeout(timerId);
+  }, [notesContentKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="h-full flex flex-col bg-gray-100">

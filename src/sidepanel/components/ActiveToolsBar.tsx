@@ -11,9 +11,17 @@ import { toolSessionManager } from '@/services/toolSessionManager';
 import { ClientRegistry } from '@/clients';
 import { AgentRegistry } from '@/agents';
 
+interface EditorAgentInfo {
+  id: string;
+  name: string;
+  capabilityCount: number;
+  capabilities: Array<{ name: string; description: string }>;
+}
+
 interface ActiveToolsBarProps {
   onAddTools: () => void;
   onToolsChange?: () => void;
+  editorAgent?: EditorAgentInfo | null;
 }
 
 interface ToolBadge {
@@ -47,7 +55,7 @@ interface ToolDetails {
   dependencies?: string[];
 }
 
-export const ActiveToolsBar: React.FC<ActiveToolsBarProps> = ({ onAddTools, onToolsChange }) => {
+export const ActiveToolsBar: React.FC<ActiveToolsBarProps> = ({ onAddTools, onToolsChange, editorAgent }) => {
   const [tools, setTools] = useState<ToolBadge[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTooltip, setShowTooltip] = useState<string | null>(null);
@@ -250,7 +258,57 @@ export const ActiveToolsBar: React.FC<ActiveToolsBarProps> = ({ onAddTools, onTo
     <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200 flex-wrap relative">
       <span className="text-xs text-gray-500 font-medium">Active tools:</span>
 
-      {tools.length === 0 ? (
+      {/* Editor agent badge */}
+      {editorAgent && (
+        <div
+          className="relative"
+          onMouseEnter={() => setShowTooltip('editor-agent')}
+          onMouseLeave={() => setShowTooltip(null)}
+        >
+          <button
+            onClick={(e) => {
+              // Show editor agent details in popup
+              const details: ToolDetails = {
+                id: editorAgent.id,
+                name: editorAgent.name,
+                description: 'Currently editing in the agent editor',
+                category: 'agent',
+                capabilities: editorAgent.capabilities.map(c => ({
+                  name: c.name,
+                  description: c.description,
+                  parameters: [],
+                })),
+              };
+              setSelectedTool(details);
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setPopupPosition({
+                top: rect.bottom + 8,
+                left: Math.max(8, Math.min(rect.left, window.innerWidth - 320)),
+              });
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border cursor-pointer hover:opacity-80 transition-opacity bg-purple-50 text-purple-700 border-purple-300"
+          >
+            <svg className="w-3 h-3 text-purple-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <title>Editor Agent</title>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            <span className="font-medium truncate max-w-[100px]">{editorAgent.name}</span>
+            <span className="text-purple-400 text-[10px]">{editorAgent.capabilityCount}</span>
+          </button>
+
+          {/* Tooltip */}
+          {showTooltip === 'editor-agent' && !selectedTool && (
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-800 text-white text-xs rounded shadow-lg whitespace-nowrap z-10">
+              Currently editing - {editorAgent.capabilityCount} {editorAgent.capabilityCount === 1 ? 'capability' : 'capabilities'} available
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
+                <div className="border-4 border-transparent border-t-gray-800"></div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tools.length === 0 && !editorAgent ? (
         <span className="text-xs text-gray-400 italic">No tools active</span>
       ) : (
         tools.map((tool) => (

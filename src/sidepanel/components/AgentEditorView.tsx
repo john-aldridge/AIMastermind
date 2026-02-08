@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MonacoEditor } from './MonacoEditor';
 import { PluginSelector } from './AgentSelector';
 import { VersionManager } from './VersionManager';
-import { EditorChatPanel } from './EditorChatPanel';
+import { ChatView } from './ChatView';
 import { CreateAgentModal } from './CreateAgentModal';
 import { AgentSourceStorageService } from '@/storage/agentSourceStorage';
 import { AgentLoader } from '@/services/agentLoader';
@@ -112,11 +112,13 @@ export const PluginEditorView: React.FC<PluginEditorViewProps> = ({ initialPlugi
     setCode(newCode);
   };
 
-  const handleApplyCodeFromChat = (newCode: string) => {
+  const handleApplyCodeFromChat = (newCode: string): boolean => {
     if (confirm('Replace current code with AI suggestion?')) {
       setCode(newCode);
       showNotification('success', 'Code applied from AI assistant');
+      return true;
     }
+    return false;
   };
 
   const handleAutoSave = async () => {
@@ -369,9 +371,8 @@ export const PluginEditorView: React.FC<PluginEditorViewProps> = ({ initialPlugi
 
         {/* Chat Panel */}
         <div className="w-1/2 flex flex-col">
-          <EditorChatPanel
-            pluginCode={code}
-            pluginName={pluginName}
+          <ChatView
+            editorContext={{ agentId: selectedPluginId || 'unknown', agentName: pluginName, pluginCode: code }}
             onApplyCode={handleApplyCodeFromChat}
           />
         </div>

@@ -52,7 +52,6 @@ export const SidePanelApp: React.FC = () => {
 
   // Function to open editor in sidepanel
   const openEditorInSidepanel = (agentId: string | null, isNew: boolean = false) => {
-    console.log('[SidePanelApp] openEditorInSidepanel called with agentId:', agentId, 'isNew:', isNew);
     setEditorAgentId(agentId);
     setEditorIsNew(isNew);
     setCurrentView('editor');

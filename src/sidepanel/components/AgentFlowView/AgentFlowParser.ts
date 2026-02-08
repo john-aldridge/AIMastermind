@@ -444,7 +444,11 @@ function parseCapability(capability: CapabilityConfig): { nodes: FlowNode[]; edg
 /**
  * Apply dagre layout to nodes - exported for auto-layout feature
  */
-export function applyLayout(nodes: FlowNode[], edges: Edge[]): FlowNode[] {
+export function applyLayout(
+  nodes: FlowNode[],
+  edges: Edge[],
+  nodeHeights?: Map<string, number>,
+): FlowNode[] {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   dagreGraph.setGraph({
@@ -455,11 +459,12 @@ export function applyLayout(nodes: FlowNode[], edges: Edge[]): FlowNode[] {
     marginy: 50,
   });
 
-  // Add nodes to dagre graph
+  // Add nodes to dagre graph, using measured heights when available
   nodes.forEach(node => {
+    const height = nodeHeights?.get(node.id) ?? NODE_DIMENSIONS.height;
     dagreGraph.setNode(node.id, {
       width: NODE_DIMENSIONS.width,
-      height: NODE_DIMENSIONS.height,
+      height,
     });
   });
 
@@ -474,11 +479,12 @@ export function applyLayout(nodes: FlowNode[], edges: Edge[]): FlowNode[] {
   // Apply calculated positions
   return nodes.map(node => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    const height = nodeHeights?.get(node.id) ?? NODE_DIMENSIONS.height;
     return {
       ...node,
       position: {
         x: nodeWithPosition.x - NODE_DIMENSIONS.width / 2,
-        y: nodeWithPosition.y - NODE_DIMENSIONS.height / 2,
+        y: nodeWithPosition.y - height / 2,
       },
     };
   });

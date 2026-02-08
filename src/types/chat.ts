@@ -21,6 +21,7 @@ export interface ChatSession {
   updatedAt: number;
   tabUrl?: string;               // URL where chat was started (for reference)
   messages: ChatMessage[];
+  editorContext?: { agentId: string; agentName: string };
 }
 
 export interface ChatStorageState {
@@ -35,4 +36,5 @@ export interface ChatSessionSummary {
   updatedAt: number;
   messageCount: number;
   preview?: string;              // First line of first user message
+  editorContext?: { agentId: string; agentName: string };
 }

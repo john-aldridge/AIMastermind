@@ -131,7 +131,7 @@ export const CapabilityNode = memo(({ data, selected }: CapabilityNodeProps) => 
 
         {/* Description */}
         {data.config.description && (
-          <div className="text-purple-200 text-xs line-clamp-2">
+          <div className="text-purple-200 text-xs">
             {data.config.description}
           </div>
         )}

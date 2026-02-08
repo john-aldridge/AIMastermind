@@ -6,6 +6,8 @@ interface ChatSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectSession: (sessionId: string) => void;
+  /** When set, filter results to sessions for this agent only */
+  filterAgentId?: string;
 }
 
 /**
@@ -33,11 +35,17 @@ export const ChatSearchModal: React.FC<ChatSearchModalProps> = ({
   isOpen,
   onClose,
   onSelectSession,
+  filterAgentId,
 }) => {
   const { searchSessions, getSessionSummaries } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<ChatSessionSummary[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const applyAgentFilter = (sessions: ChatSessionSummary[]): ChatSessionSummary[] => {
+    if (!filterAgentId) return sessions;
+    return sessions.filter(s => s.editorContext?.agentId === filterAgentId);
+  };
 
   // Focus input and load all sessions when modal opens
   useEffect(() => {
@@ -45,22 +53,22 @@ export const ChatSearchModal: React.FC<ChatSearchModalProps> = ({
       setSearchQuery('');
       // Load all sessions sorted by most recent
       const allSessions = getSessionSummaries();
-      setResults(allSessions);
+      setResults(applyAgentFilter(allSessions));
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isOpen, getSessionSummaries]);
+  }, [isOpen, getSessionSummaries, filterAgentId]);
 
   // Filter as user types
   useEffect(() => {
     if (searchQuery.trim()) {
       const found = searchSessions(searchQuery);
-      setResults(found);
+      setResults(applyAgentFilter(found));
     } else {
       // Show all sessions when search is cleared
       const allSessions = getSessionSummaries();
-      setResults(allSessions);
+      setResults(applyAgentFilter(allSessions));
     }
-  }, [searchQuery, searchSessions, getSessionSummaries]);
+  }, [searchQuery, searchSessions, getSessionSummaries, filterAgentId]);
 
   const handleSelect = (sessionId: string) => {
     onSelectSession(sessionId);
