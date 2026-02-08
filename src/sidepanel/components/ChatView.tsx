@@ -10,6 +10,286 @@ import { ActiveToolsBar } from './ActiveToolsBar';
 import { ToolPickerModal } from './ToolPickerModal';
 import { ChatSidebar } from './ChatSidebar';
 
+/** Extract a human-readable description from a JQL query */
+function describeJql(jql?: string): string {
+  if (!jql) return '';
+
+  const parts: string[] = [];
+
+  // Extract text/summary search terms
+  const textMatch = jql.match(/(?:text|summary)\s*~\s*"([^"]+)"/);
+  if (textMatch) {
+    let terms = textMatch[1].trim();
+    if (terms.length > 50) terms = terms.substring(0, 47) + '...';
+    parts.push(`matching "${terms}"`);
+  }
+
+  // Extract project
+  const projectMatch = jql.match(/project\s*=\s*"?(\w+)"?/);
+  if (projectMatch) {
+    parts.push(`in ${projectMatch[1]}`);
+  }
+
+  // Extract issue type
+  const typeMatch = jql.match(/issuetype\s*=\s*"?([^"&\s]+)"?/);
+  if (typeMatch) {
+    parts.push(`(${typeMatch[1].toLowerCase()}s)`);
+  }
+
+  return parts.length > 0 ? ' ' + parts.join(' ') : '';
+}
+
+/** Generate user-friendly progress and completion messages based on tool name and input */
+function getToolProgressMessage(toolName: string, input?: any): string {
+  switch (toolName) {
+    // Jira - search & discovery
+    case 'jira_find_similar':
+      return input?.issueKey
+        ? `Analyzing ${input.issueKey} and searching for similar issues...`
+        : 'Analyzing ticket and searching for similar issues...';
+    case 'jira_smart_search':
+    case 'jira_search':
+      return `Searching Jira${describeJql(input?.jql)}...`;
+    // Jira - issue operations
+    case 'jira_get_issue':
+      return input?.issueKey
+        ? `Pulling up details for ${input.issueKey}...`
+        : 'Pulling up issue details...';
+    case 'jira_create_issue':
+      return 'Creating a new Jira issue...';
+    case 'jira_update_issue':
+      return input?.issueKey
+        ? `Updating ${input.issueKey}...`
+        : 'Updating Jira issue...';
+    case 'jira_transition_issue':
+      return input?.issueKey
+        ? `Changing status of ${input.issueKey}...`
+        : 'Changing issue status...';
+    case 'jira_add_comment':
+      return input?.issueKey
+        ? `Adding comment to ${input.issueKey}...`
+        : 'Adding comment to issue...';
+    case 'jira_get_fields':
+      return 'Loading available Jira fields...';
+    // Confluence
+    case 'confluence_search':
+      return 'Searching Confluence...';
+    case 'confluence_get_page':
+      return 'Fetching page from Confluence...';
+    case 'confluence_get_page_children':
+      return 'Fetching child pages...';
+    case 'confluence_create_page':
+      return 'Creating Confluence page...';
+    case 'confluence_update_page':
+      return 'Updating Confluence page...';
+    case 'confluence_delete_page':
+      return 'Deleting Confluence page...';
+    case 'confluence_add_comment':
+      return 'Adding comment...';
+    case 'confluence_get_comments':
+      return 'Fetching comments...';
+    case 'confluence_add_label':
+      return 'Adding label...';
+    case 'confluence_get_page_views':
+      return 'Fetching page analytics...';
+    // Browser
+    case 'browser_execute_javascript':
+      return 'Running script on page...';
+    case 'browser_get_page_text':
+      return 'Reading page content...';
+    case 'browser_inspect_page':
+      return 'Inspecting page...';
+    case 'browser_click_element':
+      return 'Clicking element...';
+    case 'browser_fill_input':
+      return 'Filling in form field...';
+    case 'browser_get_element_text':
+      return 'Reading element text...';
+    case 'browser_remove_element':
+      return 'Removing element...';
+    case 'browser_modify_style':
+      return 'Modifying page style...';
+    case 'browser_scroll_to':
+      return 'Scrolling page...';
+    case 'browser_replace_text':
+      return 'Replacing text on page...';
+    case 'browser_translate_element':
+      return 'Translating element...';
+    case 'browser_translate_page_native':
+      return 'Translating page...';
+    // Pinterest
+    case 'pinterest_search':
+      return 'Searching Pinterest...';
+    case 'pinterest_get_board_info':
+      return 'Getting board info...';
+    case 'pinterest_download_board_images':
+      return 'Downloading board images...';
+    case 'pinterest_get_pin':
+      return 'Fetching pin details...';
+    // Agent tools
+    case 'analyze_wardrobe_board':
+      return 'Analyzing wardrobe board...';
+    default:
+      return `Running ${toolName.replace(/_/g, ' ')}...`;
+  }
+}
+
+function getToolCompletedMessage(toolName: string, input?: any): string {
+  switch (toolName) {
+    // Jira - search & discovery
+    case 'jira_find_similar':
+      return input?.issueKey
+        ? `Retrieved similar issues for ${input.issueKey}`
+        : 'Retrieved similar issues';
+    case 'jira_smart_search':
+    case 'jira_search':
+      return `Jira search complete${describeJql(input?.jql)}`;
+    // Jira - issue operations
+    case 'jira_get_issue':
+      return input?.issueKey
+        ? `Loaded details for ${input.issueKey}`
+        : 'Loaded issue details';
+    case 'jira_create_issue':
+      return 'Jira issue created';
+    case 'jira_update_issue':
+      return input?.issueKey
+        ? `Updated ${input.issueKey}`
+        : 'Issue updated';
+    case 'jira_transition_issue':
+      return input?.issueKey
+        ? `Changed status of ${input.issueKey}`
+        : 'Issue status changed';
+    case 'jira_add_comment':
+      return input?.issueKey
+        ? `Comment added to ${input.issueKey}`
+        : 'Comment added';
+    case 'jira_get_fields':
+      return 'Jira fields loaded';
+    // Confluence
+    case 'confluence_search':
+      return 'Confluence search complete';
+    case 'confluence_get_page':
+      return 'Page fetched';
+    case 'confluence_get_page_children':
+      return 'Child pages fetched';
+    case 'confluence_create_page':
+      return 'Page created';
+    case 'confluence_update_page':
+      return 'Page updated';
+    case 'confluence_delete_page':
+      return 'Page deleted';
+    case 'confluence_add_comment':
+      return 'Comment added';
+    case 'confluence_get_comments':
+      return 'Comments fetched';
+    case 'confluence_add_label':
+      return 'Label added';
+    case 'confluence_get_page_views':
+      return 'Analytics fetched';
+    // Browser
+    case 'browser_execute_javascript':
+      return 'Script executed';
+    case 'browser_get_page_text':
+      return 'Page content read';
+    case 'browser_inspect_page':
+      return 'Page inspected';
+    case 'browser_click_element':
+      return 'Element clicked';
+    case 'browser_fill_input':
+      return 'Form field filled';
+    case 'browser_get_element_text':
+      return 'Element text read';
+    case 'browser_remove_element':
+      return 'Element removed';
+    case 'browser_modify_style':
+      return 'Style modified';
+    case 'browser_scroll_to':
+      return 'Page scrolled';
+    case 'browser_replace_text':
+      return 'Text replaced';
+    case 'browser_translate_element':
+      return 'Element translated';
+    case 'browser_translate_page_native':
+      return 'Page translated';
+    // Pinterest
+    case 'pinterest_search':
+      return 'Pinterest search complete';
+    case 'pinterest_get_board_info':
+      return 'Board info retrieved';
+    case 'pinterest_download_board_images':
+      return 'Images downloaded';
+    case 'pinterest_get_pin':
+      return 'Pin details fetched';
+    // Agent tools
+    case 'analyze_wardrobe_board':
+      return 'Wardrobe board analyzed';
+    default:
+      return `Finished ${toolName.replace(/_/g, ' ')}`;
+  }
+}
+
+/** Summarize an oversized tool result using Haiku, with truncation fallback */
+async function summarizeLargeResult(resultContent: string): Promise<string> {
+  const MAX_RESULT_CHARS = 50000;
+  const originalSize = resultContent.length;
+
+  try {
+    // Get user's Anthropic API key from app store
+    const appState = useAppStore.getState();
+    const { userConfig } = appState;
+    const activeConfigId = userConfig.activeConfigurationId || 'free-model';
+    const activeConfig = userConfig.savedConfigurations.find((c: any) => c.id === activeConfigId);
+    const apiKey = activeConfig?.credentials?.apiKey;
+
+    if (!apiKey) {
+      throw new Error('No API key available for summarization');
+    }
+
+    console.log(`[ChatView] Summarizing large result... (${Math.round(originalSize / 1000)}K chars)`);
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 4000,
+        temperature: 0,
+        messages: [
+          {
+            role: 'user',
+            content: `Summarize this tool result. Keep all issue keys, summaries, statuses, priorities. For descriptions/comments, keep only the most relevant 1-2 sentences per issue. Output as compact JSON.\n\n${resultContent}`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Haiku summarization failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const summarized = data.content?.find((b: any) => b.type === 'text')?.text || '';
+
+    if (summarized) {
+      console.log(`[ChatView] Summarized: ${Math.round(originalSize / 1000)}K → ${Math.round(summarized.length / 1000)}K chars`);
+      return summarized;
+    }
+
+    throw new Error('Empty summarization response');
+  } catch (error) {
+    console.warn('[ChatView] Summarization failed, falling back to truncation:', error);
+    return resultContent.substring(0, MAX_RESULT_CHARS) +
+      '\n\n... [Result truncated — original was ' +
+      Math.round(originalSize / 1000) + 'K chars. ' +
+      'Key information is above. Ask the user if more detail is needed.]';
+  }
+}
+
 interface TabMetadata {
   tabId: number;
   title: string;
@@ -670,6 +950,31 @@ export const ChatView: React.FC = () => {
           break;
         }
 
+        // Show the AI's reasoning text if it explained what it's about to do
+        if (response.content && response.content.trim()) {
+          const reasoningSession = getActiveSession();
+          if (reasoningSession) {
+            useAppStore.setState((state) => ({
+              chatSessions: state.chatSessions.map((s) =>
+                s.id === reasoningSession.id
+                  ? {
+                      ...s,
+                      messages: [
+                        ...s.messages,
+                        {
+                          id: `status-reasoning-${Date.now()}`,
+                          role: 'assistant' as const,
+                          content: response.content.trim(),
+                          timestamp: Date.now(),
+                        },
+                      ],
+                    }
+                  : s
+              ),
+            }));
+          }
+        }
+
         // Execute all tool calls
         console.log(`[ChatView] Executing ${response.toolUses.length} tool calls`);
         const toolResults: any[] = [];
@@ -690,7 +995,7 @@ export const ChatView: React.FC = () => {
                           {
                             id: statusId,
                             role: 'assistant' as const,
-                            content: `⚙️ Executing: ${toolUse.name}... (iteration ${iteration}/${maxIterations})`,
+                            content: `⏳ ${getToolProgressMessage(toolUse.name, toolUse.input)}`,
                             timestamp: Date.now(),
                           },
                         ],
@@ -702,12 +1007,23 @@ export const ChatView: React.FC = () => {
 
             const result = await executeToolCall(toolUse.name, toolUse.input);
 
-            // Remove status message from session
+            // Add completion message (keep the progress message too)
             if (statusSession) {
               useAppStore.setState((state) => ({
                 chatSessions: state.chatSessions.map((s) =>
                   s.id === statusSession.id
-                    ? { ...s, messages: s.messages.filter((m) => m.id !== statusId) }
+                    ? {
+                        ...s,
+                        messages: [
+                          ...s.messages,
+                          {
+                            id: `status-${Date.now()}`,
+                            role: 'assistant' as const,
+                            content: `✅ ${getToolCompletedMessage(toolUse.name, toolUse.input)}`,
+                            timestamp: Date.now(),
+                          },
+                        ],
+                      }
                     : s
                 ),
               }));
@@ -718,6 +1034,11 @@ export const ChatView: React.FC = () => {
             if (result.contextNote) {
               // Add prominent context note at the beginning
               resultContent = `${result.contextNote}\n\n===== TOOL RESULT =====\n${resultContent}`;
+            }
+
+            // Summarize oversized results using AI, with truncation fallback
+            if (resultContent.length > 50000) {
+              resultContent = await summarizeLargeResult(resultContent);
             }
 
             toolResults.push({
@@ -814,10 +1135,8 @@ export const ChatView: React.FC = () => {
   };
 
   const handleClearChat = () => {
-    if (confirm('Start a new chat?')) {
-      createNewSession();
-      setCurrentFile(null);
-    }
+    createNewSession();
+    setCurrentFile(null);
   };
 
   const handleFileSelected = (filename: string, content: string, fileInfo: DownloadInfo) => {
@@ -1016,9 +1335,11 @@ export const ChatView: React.FC = () => {
                 }`}
               >
                 <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                <p className="text-xs mt-1 opacity-70">
-                  {new Date(message.timestamp).toLocaleTimeString()}
-                </p>
+                {!message.id.startsWith('status-') && (
+                  <p className="text-xs mt-1 opacity-70">
+                    {new Date(message.timestamp).toLocaleTimeString()}
+                  </p>
+                )}
                 {showDebugButton && (
                   <div className="mt-3 pt-3 border-t border-red-200">
                     <button
@@ -1110,10 +1431,10 @@ export const ChatView: React.FC = () => {
             <button
               onClick={handleClearChat}
               className="text-xs text-gray-500 hover:text-gray-700"
-              title="Clear chat"
+              title="New chat"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
             </button>
           </div>

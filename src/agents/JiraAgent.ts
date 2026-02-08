@@ -13,6 +13,7 @@ import {
   AgentCapabilityDefinition,
   CapabilityResult,
 } from './AgentInterface';
+import { useAppStore } from '@/state/appStore';
 
 export class JiraAgent extends AgentBase {
   getMetadata(): AgentMetadata {
@@ -62,6 +63,8 @@ export class JiraAgent extends AgentBase {
 The agent will determine which fields to request based on your query intent.
 You can specify explicit fields if needed, or let the agent decide.
 
+Do not use this after jira_find_similar to search for more similar issues — that tool already performs comprehensive multi-query similarity searches with synonym coverage. Use this only when you need to search by different criteria (status, assignee, date ranges, etc.).
+
 AVAILABLE FIELDS (commonly used):
 - key, summary, description, status, priority, assignee, reporter
 - issuetype, project, labels, components, fixVersions, versions
@@ -106,11 +109,14 @@ JQL SEARCH TIPS:
         name: 'jira_find_similar',
         description: `Find Jira issues similar to a reference ticket.
 
+This performs a thorough multi-query search using AI-generated search terms from the ticket's full content including comments. It searches using multiple keyword variations and synonyms to maximize coverage. Additional similarity searches are not needed.
+
 The agent will:
 1. Fetch the reference issue with full details (including comments)
-2. Extract key information and summarize
-3. Search for similar issues using text matching
-4. Return similar issues with relevance context`,
+2. Use AI to generate multiple diverse search query sets from the ticket content
+3. Execute all queries in parallel for comprehensive coverage
+4. Merge and deduplicate results
+5. Return similar issues with relevance context`,
         parameters: [
           {
             name: 'issueKey',
@@ -394,7 +400,7 @@ The agent will:
   }
 
   /**
-   * Find issues similar to a reference ticket
+   * Find issues similar to a reference ticket using AI-generated search queries
    */
   private async findSimilar(
     client: any,
@@ -402,9 +408,10 @@ The agent will:
   ): Promise<CapabilityResult> {
     const { issueKey, maxResults = 5, project } = params;
 
-    // 1. Get reference issue with full details
+    // 1. Get reference issue with full details (including comments)
     const refResult = await client.executeCapability('jira_get_issue', {
       issueKey,
+      fields: 'summary,description,comment,status,priority,issuetype,project,labels,components',
       expand: 'renderedFields',
     });
 
@@ -412,28 +419,77 @@ The agent will:
 
     const refIssue = refResult.data;
 
-    // 2. Build search text from summary + description
+    // Build full ticket content for AI analysis
     const summary = refIssue.fields?.summary || '';
     const description = refIssue.fields?.description || '';
-    const searchText = `${summary} ${description}`.trim();
+    const comments = refIssue.fields?.comment?.comments || [];
+    const commentBodies = comments.map((c: any) => c.body || '').filter(Boolean).join('\n---\n');
+    const labels = (refIssue.fields?.labels || []).join(', ');
+    const components = (refIssue.fields?.components || []).map((c: any) => c.name).join(', ');
 
-    // Extract meaningful search terms (first ~200 chars, escape for JQL)
-    const searchTerms = this.escapeJql(searchText.substring(0, 200));
-
-    // 3. Build JQL for similar issues
-    let jql = `text ~ "${searchTerms}" AND key != ${issueKey}`;
+    const ticketContent = [
+      `Title: ${summary}`,
+      description ? `Description: ${description}` : '',
+      labels ? `Labels: ${labels}` : '',
+      components ? `Components: ${components}` : '',
+      commentBodies ? `Comments:\n${commentBodies}` : '',
+    ].filter(Boolean).join('\n\n');
 
     // Determine project scope
     const searchProject = project || refIssue.fields?.project?.key || this.config.default_project;
-    if (searchProject) {
-      jql = `project = ${searchProject} AND ${jql}`;
+
+    // 2. Generate AI search queries using Haiku
+    let searchTermSets: string[];
+    try {
+      searchTermSets = await this.generateSearchQueries(ticketContent);
+      console.log('[JiraAgent] AI generated search queries:', searchTermSets);
+    } catch (error) {
+      // Fallback to naive approach if Haiku call fails
+      console.warn('[JiraAgent] AI query generation failed, using fallback:', error);
+      const searchText = `${summary} ${description}`.trim();
+      searchTermSets = [this.escapeJql(searchText.substring(0, 200))];
     }
 
-    // 4. Search for similar issues
-    const searchResult = await client.executeCapability('jira_search', {
-      jql,
-      fields: 'key,summary,description,status,priority,assignee,issuetype',
-      maxResults,
+    // 3. Execute all queries in parallel
+    const queryPromises = searchTermSets.slice(0, 5).map((terms) => {
+      const escapedTerms = this.escapeJql(terms);
+      let jql = `text ~ "${escapedTerms}" AND key != ${issueKey}`;
+      if (searchProject) {
+        jql = `project = ${searchProject} AND ${jql}`;
+      }
+      console.log('[JiraAgent] Executing JQL:', jql);
+      return client.executeCapability('jira_search', {
+        jql,
+        fields: 'key,summary,description,status,priority,assignee,issuetype',
+        maxResults: 10,
+      }).catch((err: any) => {
+        console.warn('[JiraAgent] Search query failed:', jql, err);
+        return { success: false, data: { issues: [] } };
+      });
+    });
+
+    const searchResults = await Promise.all(queryPromises);
+
+    // 4. Merge and deduplicate results by issue key
+    const seenKeys = new Set<string>();
+    const allIssues: any[] = [];
+    for (const result of searchResults) {
+      const issues = result.data?.issues || [];
+      for (const issue of issues) {
+        if (!seenKeys.has(issue.key)) {
+          seenKeys.add(issue.key);
+          allIssues.push(issue);
+        }
+      }
+    }
+
+    // Limit to requested maxResults
+    const limitedIssues = allIssues.slice(0, maxResults);
+    const jqlsUsed = searchTermSets.slice(0, 5).map((terms) => {
+      const escapedTerms = this.escapeJql(terms);
+      let jql = `text ~ "${escapedTerms}" AND key != ${issueKey}`;
+      if (searchProject) jql = `project = ${searchProject} AND ${jql}`;
+      return jql;
     });
 
     return {
@@ -446,17 +502,97 @@ The agent will:
           status: refIssue.fields?.status?.name,
           issuetype: refIssue.fields?.issuetype?.name,
         },
-        similarIssues: searchResult.data?.issues?.map((issue: any) => ({
+        similarIssues: limitedIssues.map((issue: any) => ({
           key: issue.key,
           summary: issue.fields?.summary,
           status: issue.fields?.status?.name,
           priority: issue.fields?.priority?.name,
           issuetype: issue.fields?.issuetype?.name,
-        })) || [],
-        total: searchResult.data?.total || 0,
-        jqlUsed: jql,
+        })),
+        total: allIssues.length,
+        queriesUsed: searchTermSets.length,
+        jqlsUsed,
       },
     };
+  }
+
+  /**
+   * Use Haiku to generate diverse JQL search term sets from ticket content
+   */
+  private async generateSearchQueries(ticketContent: string): Promise<string[]> {
+    const apiKey = this.getAnthropicApiKey();
+    if (!apiKey) {
+      throw new Error('No Anthropic API key available');
+    }
+
+    const systemPrompt = `You are generating Jira JQL text search queries to find issues similar to this ticket.
+Jira uses Lucene — text ~ "words" does keyword OR matching with stemming, but true
+synonyms (e.g. "incorrect" vs "wrong") are different tokens and won't match each other.
+
+Generate up to 5 search queries, each as a short string of keywords (no JQL syntax, just
+the search terms). Each query should target a different angle or use different
+synonyms/terminology to maximize coverage. Focus on:
+- Core problem description
+- Technical terms from comments (error codes, component names)
+- Synonym variations for key concepts
+- Area/feature-specific terms
+
+Respond as a JSON array of strings, e.g. ["query1 terms", "query2 terms", ...]`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 500,
+        temperature: 0,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: `Analyze this ticket and generate search queries:\n\n${ticketContent}` },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(`Haiku API error: ${(error as any).error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const textContent = data.content?.find((b: any) => b.type === 'text')?.text || '';
+
+    // Parse JSON array from response — handle markdown code blocks
+    const jsonMatch = textContent.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      throw new Error('Failed to parse search queries from Haiku response');
+    }
+
+    const queries: string[] = JSON.parse(jsonMatch[0]);
+    return queries.filter((q: string) => typeof q === 'string' && q.trim().length > 0).slice(0, 5);
+  }
+
+  /**
+   * Get Anthropic API key from user's active configuration
+   */
+  private getAnthropicApiKey(): string | null {
+    try {
+      const appState = useAppStore.getState();
+      const { userConfig } = appState;
+      const activeConfigId = userConfig.activeConfigurationId || 'free-model';
+      const activeConfig = userConfig.savedConfigurations.find((c: any) => c.id === activeConfigId);
+
+      if (activeConfig?.credentials?.apiKey) {
+        return activeConfig.credentials.apiKey;
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -474,11 +610,10 @@ The agent will:
       if (issue.fields) {
         for (const [key, value] of Object.entries(issue.fields)) {
           if (key === 'comment' && value) {
-            // Handle comments specially
+            // Handle comments specially — extract body text only, cap at 5 by default
             const comments = (value as any).comments || [];
-            formatted.comments = maxComments
-              ? comments.slice(0, maxComments)
-              : comments;
+            const effectiveMax = maxComments ?? 5;
+            formatted.comments = comments.slice(0, effectiveMax).map((c: any) => c.body || '');
             formatted.totalComments = (value as any).total || comments.length;
           } else if (value && typeof value === 'object') {
             // Extract name/displayName from objects like status, priority, assignee
